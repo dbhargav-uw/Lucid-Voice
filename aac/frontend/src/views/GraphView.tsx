@@ -5,17 +5,34 @@
 // nodes emphasized most) and shows the candidates with their grounded labels.
 
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useReducedMotion } from "framer-motion";
 import ForceGraph, {
   KIND_COLORS,
   type FGNode,
   type FGLink,
   type GraphData,
   type Highlight,
+  type Growth,
 } from "../components/ForceGraph";
 import { getGraph, generate } from "../lib/api";
+import { DUR, EASE_OUT } from "../lib/motion";
 
 const PERSON_ID = "elena";
 const POLL_MS = 600;
+
+// LIGHT theme tokens (mirror tailwind.config.js so the inline styles re-theme
+// by value, keeping AA contrast on the soft off-white canvas).
+const INK = "#F5F7FA";
+const INK_RAISED = "#FFFFFF";
+const INK_LINE = "#D6DEE8";
+const TEXT = "#161A21";
+const TEXT_MUTED = "#566273";
+const TEXT_FAINT = "#8089A3";
+const VOICE = "#E14826"; // THE HUMAN coral
+const VOICE_DEEP = "#C23A1B";
+const VOICE_SOFT = "#FCE9E3";
+const MIND = "#0C8276"; // THE MACHINE teal
+const MIND_SOFT = "#DBF1ED";
 
 interface TraceCandidate {
   text: string;
@@ -67,8 +84,17 @@ export default function GraphView() {
   const [dims, setDims] = useState({ w: 0, h: 0 });
   const [triggering, setTriggering] = useState<string | null>(null);
 
+  // Memory growth: "after" = full current graph; "start" = sparse first-degree
+  // subset. `t` (0 -> 1) is animated by rAF and interpolates the rendered data.
+  const [mode, setMode] = useState<"start" | "after">("after");
+  const [t, setT] = useState(1);
+  const reduceMotion = useReducedMotion();
+
   const containerRef = useRef<HTMLDivElement>(null);
   const traceSig = useRef<string>("");
+  const rafRef = useRef<number | null>(null);
+  const tRef = useRef(t);
+  tRef.current = t;
 
   // --- load the graph once ---
   useEffect(() => {
@@ -190,46 +216,259 @@ export default function GraphView() {
     [data],
   );
 
+  // --- "session start" subset: deterministic first-degree neighborhood of the
+  // user (Elena) - the user node plus every node directly linked to them, and
+  // every edge incident to the user. That is the sparse "what we knew at the
+  // start of the session" graph; the rest is what got "learned". ---
+  const core = useMemo(() => {
+    const coreNodeIds = new Set<string>();
+    const coreEdgeIds = new Set<string>();
+    if (!data) return { coreNodeIds, coreEdgeIds };
+    const userIds = new Set(data.nodes.filter((n) => n.kind === "user").map((n) => n.id));
+    userIds.forEach((id) => coreNodeIds.add(id));
+    const ref = (e: string | FGNode) => (typeof e === "string" ? e : e.id);
+    for (const l of data.links) {
+      const s = ref(l.source);
+      const tg = ref(l.target);
+      if (userIds.has(s) || userIds.has(tg)) {
+        coreEdgeIds.add(l.id);
+        coreNodeIds.add(s);
+        coreNodeIds.add(tg);
+      }
+    }
+    return { coreNodeIds, coreEdgeIds };
+  }, [data]);
+
+  // --- animate `t` toward the target mode (1 = after, 0 = start). Snap under
+  // reduced motion; otherwise an eased rAF ramp drives the grow/recede. ---
+  useEffect(() => {
+    const target = mode === "after" ? 1 : 0;
+    if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
+    if (reduceMotion) {
+      setT(target);
+      return;
+    }
+    const from = tRef.current;
+    if (Math.abs(from - target) < 0.001) return;
+    const dur = DUR.moment * 2.4 * 1000; // a deliberate, legible consolidation
+    const start = performance.now();
+    const step = (now: number) => {
+      const p = Math.min(1, (now - start) / dur);
+      const e = ease(p);
+      setT(from + (target - from) * e);
+      if (p < 1) rafRef.current = requestAnimationFrame(step);
+      else rafRef.current = null;
+    };
+    rafRef.current = requestAnimationFrame(step);
+    return () => {
+      if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
+    };
+  }, [mode, reduceMotion]);
+
+  const growth = useMemo<Growth>(
+    () => ({ coreNodeIds: core.coreNodeIds, coreEdgeIds: core.coreEdgeIds, t }),
+    [core, t],
+  );
+
+  // Caption counts: full graph vs the sparse session-start subset.
+  const startCount = core.coreNodeIds.size;
+  const fullCount = data?.nodes.length ?? 0;
+  const caption =
+    mode === "after"
+      ? `After learning: ${fullCount} memories, stronger links.`
+      : `Session start: ${startCount} memories.`;
+
   return (
-    <div style={{ display: "flex", height: "100%", background: "#0b1220", color: "#dce4ee" }}>
+    <div style={{ display: "flex", height: "100%", background: INK, color: TEXT }}>
       {/* Graph canvas */}
-      <div ref={containerRef} style={{ position: "relative", flex: 1, minWidth: 0 }}>
+      <div ref={containerRef} style={{ position: "relative", flex: 1, minWidth: 0, background: INK }}>
         {data && dims.w > 0 && dims.h > 0 ? (
-          <ForceGraph data={data} width={dims.w} height={dims.h} highlight={highlight} />
+          <ForceGraph
+            data={data}
+            width={dims.w}
+            height={dims.h}
+            highlight={highlight}
+            growth={growth}
+          />
         ) : (
-          <div style={{ display: "grid", placeItems: "center", height: "100%", opacity: 0.6 }}>
+          <div
+            style={{
+              display: "grid",
+              placeItems: "center",
+              height: "100%",
+              color: TEXT_MUTED,
+              fontSize: 14,
+            }}
+          >
             {error ? `Could not load graph: ${error}` : "Loading memory graph…"}
           </div>
         )}
 
         {/* Status (top-left) */}
         <div style={overlay("top")}>
-          <div style={{ fontSize: 16, fontWeight: 700 }}>Elena · memory graph</div>
-          <div style={{ fontSize: 12, opacity: 0.7 }}>
+          <div style={{ fontSize: 16, fontWeight: 700, color: TEXT }}>Elena · memory graph</div>
+          <div style={{ fontSize: 12, color: TEXT_MUTED, marginTop: 2 }}>
             {data ? `${data.nodes.length} nodes · ${data.links.length} edges` : "—"}
             {" · "}
-            <span style={{ color: highlight.active ? "#7fdcff" : "#7a8aa0" }}>
-              {highlight.active ? "retrieved" : "idle"}
+            <span
+              style={{
+                color: highlight.active ? MIND : TEXT_FAINT,
+                fontWeight: 600,
+              }}
+            >
+              {highlight.active ? "firing" : "idle"}
             </span>
           </div>
         </div>
 
+        {/* Memory growth toggle (top-right) */}
+        <div
+          style={{
+            ...overlay("top"),
+            left: "auto",
+            right: 14,
+            display: "flex",
+            flexDirection: "column",
+            gap: 8,
+            maxWidth: 320,
+          }}
+        >
+          <div
+            style={{
+              fontSize: 10.5,
+              letterSpacing: "0.1em",
+              textTransform: "uppercase",
+              color: TEXT_MUTED,
+              fontWeight: 600,
+            }}
+          >
+            Memory growth
+          </div>
+          <div
+            role="radiogroup"
+            aria-label="Memory growth stage"
+            style={{
+              display: "inline-flex",
+              padding: 3,
+              gap: 3,
+              borderRadius: 10,
+              background: INK,
+              border: `1px solid ${INK_LINE}`,
+            }}
+          >
+            {(
+              [
+                { key: "start", label: "Session start" },
+                { key: "after", label: "After learning" },
+              ] as const
+            ).map((opt) => {
+              const on = mode === opt.key;
+              return (
+                <button
+                  key={opt.key}
+                  type="button"
+                  role="radio"
+                  aria-checked={on}
+                  onClick={() => setMode(opt.key)}
+                  style={{
+                    fontFamily:
+                      "ui-monospace, SFMono-Regular, Menlo, monospace",
+                    fontSize: 12,
+                    padding: "6px 11px",
+                    borderRadius: 8,
+                    border: `1px solid ${on ? MIND : "transparent"}`,
+                    background: on ? MIND_SOFT : "transparent",
+                    color: on ? "#075E55" : TEXT_MUTED,
+                    fontWeight: on ? 600 : 500,
+                    cursor: "pointer",
+                    transition: `background ${DUR.fast}s, color ${DUR.fast}s`,
+                  }}
+                >
+                  {opt.label}
+                </button>
+              );
+            })}
+          </div>
+          <div
+            aria-live="polite"
+            style={{
+              fontSize: 12,
+              color: TEXT_MUTED,
+              lineHeight: 1.45,
+            }}
+          >
+            {caption}
+          </div>
+        </div>
+
         {/* Legend (bottom-left) */}
-        <div style={{ ...overlay("bottom"), display: "flex", flexWrap: "wrap", gap: 10, maxWidth: 360 }}>
-          {usedKinds.map((k) => (
-            <span key={k} style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12 }}>
+        <div
+          style={{
+            ...overlay("bottom"),
+            display: "flex",
+            flexDirection: "column",
+            gap: 8,
+            maxWidth: 380,
+          }}
+        >
+          <div
+            style={{
+              fontSize: 10.5,
+              letterSpacing: "0.1em",
+              textTransform: "uppercase",
+              color: TEXT_MUTED,
+              fontWeight: 600,
+            }}
+          >
+            Legend
+          </div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: "6px 14px" }}>
+            {usedKinds.map((k) => (
               <span
+                key={k}
                 style={{
-                  width: 11,
-                  height: 11,
-                  borderRadius: "50%",
-                  background: KIND_COLORS[k] ?? "#9aa6b5",
-                  boxShadow: `0 0 6px ${KIND_COLORS[k] ?? "#9aa6b5"}`,
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 7,
+                  fontSize: 12.5,
+                  color: TEXT,
                 }}
-              />
-              {k}
-            </span>
-          ))}
+              >
+                <span
+                  style={{
+                    width: 12,
+                    height: 12,
+                    borderRadius: "50%",
+                    background: KIND_COLORS[k] ?? "#6B7787",
+                    border: "1px solid rgba(22,26,33,0.14)",
+                  }}
+                />
+                {k}
+              </span>
+            ))}
+          </div>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 7,
+              fontSize: 12,
+              color: TEXT_MUTED,
+              paddingTop: 2,
+              borderTop: `1px solid ${INK_LINE}`,
+              marginTop: 2,
+            }}
+          >
+            <span
+              style={{
+                width: 14,
+                height: 0,
+                borderTop: `2px solid ${VOICE}`,
+                display: "inline-block",
+              }}
+            />
+            firing pulse: retrieved memory path
+          </div>
         </div>
       </div>
 
@@ -238,14 +477,14 @@ export default function GraphView() {
         style={{
           width: 340,
           flexShrink: 0,
-          borderLeft: "1px solid #1c2840",
-          background: "#0d1626",
+          borderLeft: `1px solid ${INK_LINE}`,
+          background: INK_RAISED,
           padding: "18px 16px",
           overflowY: "auto",
         }}
       >
-        <h2 style={{ margin: "0 0 4px", fontSize: 18 }}>Reconstruction</h2>
-        <p style={{ margin: "0 0 14px", fontSize: 12.5, opacity: 0.65, lineHeight: 1.5 }}>
+        <h2 style={{ margin: "0 0 4px", fontSize: 18, color: TEXT }}>Reconstruction</h2>
+        <p style={{ margin: "0 0 14px", fontSize: 12.5, color: TEXT_MUTED, lineHeight: 1.5 }}>
           The candidates from the latest <code>/generate</code>, grounded in the lit-up nodes.
         </p>
 
@@ -258,7 +497,7 @@ export default function GraphView() {
         )}
 
         {!meta && (
-          <div style={{ fontSize: 13, opacity: 0.6, marginBottom: 16 }}>
+          <div style={{ fontSize: 13, color: TEXT_MUTED, marginBottom: 16 }}>
             No reconstruction yet. Trigger one below (or from the Speak view).
           </div>
         )}
@@ -267,15 +506,15 @@ export default function GraphView() {
           <div
             key={i}
             style={{
-              border: "1px solid #1f2c47",
-              background: "#101b2e",
+              border: `1px solid ${INK_LINE}`,
+              background: INK,
               borderRadius: 12,
               padding: "10px 12px",
               marginBottom: 10,
             }}
           >
-            <div style={{ fontSize: 15, lineHeight: 1.4 }}>{c.text}</div>
-            <div style={{ fontSize: 11, opacity: 0.55, margin: "6px 0 8px" }}>
+            <div style={{ fontSize: 15, lineHeight: 1.4, color: TEXT }}>{c.text}</div>
+            <div style={{ fontSize: 11, color: TEXT_MUTED, margin: "6px 0 8px" }}>
               {c.register} · {c.length_label}
             </div>
             <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
@@ -287,9 +526,9 @@ export default function GraphView() {
                     fontSize: 11,
                     padding: "2px 8px",
                     borderRadius: 999,
-                    background: "#13314a",
-                    color: "#9fd0ff",
-                    border: "1px solid #1d4a66",
+                    background: VOICE_SOFT,
+                    color: VOICE_DEEP,
+                    border: `1px solid ${VOICE}`,
                   }}
                 >
                   {labelById.get(id) ?? id}
@@ -299,7 +538,18 @@ export default function GraphView() {
           </div>
         ))}
 
-        <h3 style={{ fontSize: 13, opacity: 0.7, margin: "18px 0 8px" }}>Try it</h3>
+        <h3
+          style={{
+            fontSize: 11,
+            letterSpacing: "0.1em",
+            textTransform: "uppercase",
+            color: TEXT_MUTED,
+            fontWeight: 600,
+            margin: "18px 0 8px",
+          }}
+        >
+          Try it
+        </h3>
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           {TRY_IT.map((t) => (
             <button
@@ -311,9 +561,9 @@ export default function GraphView() {
                 textAlign: "left",
                 padding: "9px 12px",
                 borderRadius: 10,
-                border: "1px solid #24344f",
-                background: triggering === t.label ? "#1b3350" : "#111d31",
-                color: "#cfe0f2",
+                border: `1px solid ${triggering === t.label ? MIND : INK_LINE}`,
+                background: triggering === t.label ? MIND_SOFT : INK_RAISED,
+                color: TEXT,
                 fontSize: 13,
                 cursor: triggering ? "wait" : "pointer",
               }}
@@ -327,16 +577,42 @@ export default function GraphView() {
   );
 }
 
+// Evaluate the shared EASE_OUT cubic-bezier (0.16, 1, 0.3, 1) at progress p.
+// Newton-step solve for the curve parameter, then read its y. Keeps the growth
+// ramp on the same easing language as the rest of the app (lib/motion).
+function ease(p: number): number {
+  const [x1, y1, x2, y2] = EASE_OUT;
+  if (p <= 0) return 0;
+  if (p >= 1) return 1;
+  const cx = (u: number) =>
+    ((1 - u) ** 2 * 3 * u * x1) + ((1 - u) * 3 * u * u * x2) + u ** 3;
+  const cy = (u: number) =>
+    ((1 - u) ** 2 * 3 * u * y1) + ((1 - u) * 3 * u * u * y2) + u ** 3;
+  let u = p;
+  for (let i = 0; i < 6; i++) {
+    const x = cx(u) - p;
+    const dx =
+      3 * (1 - u) ** 2 * x1 +
+      6 * (1 - u) * u * (x2 - x1) +
+      3 * u * u * (1 - x2);
+    if (Math.abs(dx) < 1e-5) break;
+    u -= x / dx;
+    u = Math.min(1, Math.max(0, u));
+  }
+  return cy(u);
+}
+
 function overlay(pos: "top" | "bottom"): CSSProperties {
   return {
     position: "absolute",
     left: 14,
     [pos]: 14,
-    padding: "8px 12px",
+    padding: "10px 13px",
     borderRadius: 12,
-    background: "rgba(8,14,24,0.6)",
-    backdropFilter: "blur(6px)",
-    border: "1px solid rgba(120,150,190,0.15)",
+    background: "rgba(255,255,255,0.82)",
+    backdropFilter: "blur(8px)",
+    border: `1px solid ${INK_LINE}`,
+    boxShadow: "0 1px 2px 0 rgba(22,26,33,0.04), 0 10px 24px -14px rgba(22,26,33,0.12)",
   };
 }
 
@@ -347,12 +623,12 @@ function Pill({ label, value, warn }: { label: string; value: string; warn?: boo
         fontSize: 11,
         padding: "3px 9px",
         borderRadius: 999,
-        background: warn ? "#3a2a12" : "#142235",
-        color: warn ? "#ffcf8f" : "#9fb6d4",
-        border: `1px solid ${warn ? "#5a4220" : "#22344f"}`,
+        background: warn ? "#FCE9E3" : MIND_SOFT,
+        color: warn ? VOICE_DEEP : MIND,
+        border: `1px solid ${warn ? VOICE : "rgba(12,130,118,0.35)"}`,
       }}
     >
-      {label}: <strong style={{ color: warn ? "#ffe0b0" : "#dce8f7" }}>{value}</strong>
+      {label}: <strong style={{ color: warn ? VOICE_DEEP : "#075E55" }}>{value}</strong>
     </span>
   );
 }
