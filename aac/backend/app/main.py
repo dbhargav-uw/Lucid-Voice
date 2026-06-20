@@ -11,6 +11,7 @@ optional cloud SDKs are missing.
 from __future__ import annotations
 
 import logging
+import time
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -61,57 +62,76 @@ latest_trace: dict = {}
 # crashes import. Each helper caches its result in `_services` and degrades to
 # None (with a warning) on failure; endpoints stay shaped regardless.
 
-_services: dict = {}
+_singletons: dict = {}
 
 
-def _get_service(name: str):
-    """Lazily construct and cache a service instance by name.
+def _get(name: str):
+    """Lazily construct and cache a provider/service with its dependencies.
 
-    Returns the service, or None if construction fails (logged). Endpoints
-    still return correctly-shaped placeholders in the None case.
+    Returns the instance, or None if construction fails (logged). Endpoints
+    degrade to correctly-shaped placeholders in the None case, so a missing
+    heavy dependency never crashes the API.
     """
-    if name in _services:
-        return _services[name]
+    if name in _singletons:
+        return _singletons[name]
 
-    service = None
+    inst = None
     try:
-        from app import services as svc  # lazy import of service layer
+        if name == "graph":
+            from app.services.graph import GraphService
 
-        ctor = {
-            "retrieval": getattr(svc, "RetrievalService", None),
-            "generation": getattr(svc, "GenerationService", None),
-            "graph": getattr(svc, "GraphService", None),
-            "learning": getattr(svc, "LearningService", None),
-            "cache": getattr(svc, "CacheService", None),
-        }.get(name)
-        if ctor is not None:
-            service = ctor()
-    except Exception as exc:  # pragma: no cover - defensive scaffold guard
-        logger.warning("Could not initialize service %r: %s", name, exc)
-        service = None
+            inst = GraphService()
+            inst.connect()  # opens/creates Kuzu + schema
+        elif name == "embedding":
+            from app.providers import get_embedding_provider
 
-    _services[name] = service
-    return service
+            inst = get_embedding_provider()
+        elif name == "llm":
+            from app.providers import get_llm_provider
+
+            inst = get_llm_provider()
+        elif name == "retrieval":
+            from app.services.retrieval import RetrievalService
+
+            inst = RetrievalService(_get("graph"), _get("llm"), _get("embedding"))
+        elif name == "generation":
+            from app.services.generation import GenerationService
+
+            inst = GenerationService(_get("llm"))
+        elif name == "learning":
+            from app.services.learning import LearningService
+
+            inst = LearningService(_get("graph"), _get("llm"), _get("embedding"))
+        elif name == "cache":
+            from app.services.cache import CacheService
+
+            inst = CacheService()
+    except Exception as exc:  # pragma: no cover - defensive guard
+        logger.warning("Could not initialize %r: %s", name, exc)
+        inst = None
+
+    _singletons[name] = inst
+    return inst
 
 
 def get_retrieval_service():
-    return _get_service("retrieval")
+    return _get("retrieval")
 
 
 def get_generation_service():
-    return _get_service("generation")
+    return _get("generation")
 
 
 def get_graph_service():
-    return _get_service("graph")
+    return _get("graph")
 
 
 def get_learning_service():
-    return _get_service("learning")
+    return _get("learning")
 
 
 def get_cache_service():
-    return _get_service("cache")
+    return _get("cache")
 
 
 def _provider_status() -> dict:
@@ -143,33 +163,66 @@ def health() -> HealthResponse:
 
 @app.post("/generate", response_model=GenerateResponse)
 def generate(req: GenerateRequest) -> GenerateResponse:
-    """Generate grounded utterance candidates from fragments + context."""
-    global latest_trace
+    """Reconstruct grounded utterance candidates from fragments + context.
 
-    # TODO Phase 3: real retrieval + generation. Placeholder shape only.
-    retrieval = RetrievalInfo(
-        anchor_ids=[],
-        subgraph_node_ids=[],
-        subgraph_edge_ids=[],
-        confidence=0.0,
+    Pipeline: hybrid retrieval (anchor → graph expand → vector → rerank →
+    confidence gate) then LLM generation. On low confidence, ABSTAIN and ask for
+    one more word instead of guessing.
+    """
+    global latest_trace
+    t0 = time.time()
+
+    retrieval = get_retrieval_service()
+    generation = get_generation_service()
+
+    # Degraded mode: services unavailable (e.g. kuzu/LLM missing) -> shaped empty.
+    if retrieval is None or generation is None:
+        info = RetrievalInfo()
+        trace = {"phase": "degraded", "reason": "retrieval/generation unavailable",
+                 "person_id": req.person_id, "fragments": req.fragments}
+        latest_trace = trace
+        return GenerateResponse(candidates=[], retrieval=info, trace=trace,
+                                abstain=True,
+                                abstain_reason="The local engine is not available right now.")
+
+    r = retrieval.retrieve(req.person_id, req.fragments, req.context or "", req.situation)
+    info = RetrievalInfo(**r["retrieval"])
+
+    if r.get("abstain"):
+        trace = {
+            "anchors": r["retrieval"]["anchor_ids"],
+            "subgraph_node_ids": r["retrieval"]["subgraph_node_ids"],
+            "subgraph_edge_ids": r["retrieval"]["subgraph_edge_ids"],
+            "confidence": r["confidence"],
+            "latency_ms": int((time.time() - t0) * 1000),
+            "provider": {"llm": settings.llm_provider, "model": settings.lm_studio_model},
+            "abstain": True,
+            "rationales": [],
+            "topk": r.get("topk", []),
+        }
+        latest_trace = trace
+        return GenerateResponse(candidates=[], retrieval=info, trace=trace,
+                                abstain=True, abstain_reason=r.get("abstain_reason"))
+
+    candidates = generation.generate_candidates(
+        req.fragments, req.context or "", r["context_block"], valid_node_ids=r["grounded_ids"]
     )
-    candidate = Candidate(
-        text="",
-        register="neutral",
-        length_label="short",
-        rationale="Phase 1 scaffold placeholder.",
-        grounded_node_ids=[],
-    )
-    trace: dict = {
-        "person_id": req.person_id,
-        "fragments": req.fragments,
-        "phase": "scaffold",
+    trace = {
+        "anchors": r["retrieval"]["anchor_ids"],
+        "subgraph_node_ids": r["retrieval"]["subgraph_node_ids"],
+        "subgraph_edge_ids": r["retrieval"]["subgraph_edge_ids"],
+        "confidence": r["confidence"],
+        "latency_ms": int((time.time() - t0) * 1000),
+        "provider": {"llm": settings.llm_provider, "model": settings.lm_studio_model},
+        "abstain": False,
+        "rationales": [c.get("rationale", "") for c in candidates],
+        "topk": r.get("topk", []),
     }
     latest_trace = trace
 
     return GenerateResponse(
-        candidates=[candidate],
-        retrieval=retrieval,
+        candidates=[Candidate(**c) for c in candidates],
+        retrieval=info,
         trace=trace,
         abstain=False,
         abstain_reason=None,
@@ -214,8 +267,16 @@ def enroll(req: EnrollRequest) -> EnrollResponse:
 @app.get("/graph/{person_id}", response_model=GraphResponse)
 def graph(person_id: str) -> GraphResponse:
     """Return the person's knowledge graph (nodes + edges)."""
-    # TODO Phase 2/5: real graph read from Kuzu.
-    return GraphResponse(nodes=[], edges=[])
+    svc = get_graph_service()
+    if svc is None:
+        return GraphResponse(nodes=[], edges=[])
+    try:
+        data = svc.get_graph(person_id)
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.warning("get_graph(%r) failed: %s", person_id, exc)
+        return GraphResponse(nodes=[], edges=[])
+    # Pydantic coerces the GraphNode/GraphEdge-shaped dicts into models.
+    return GraphResponse(nodes=data["nodes"], edges=data["edges"])
 
 
 @app.get("/trace/latest")

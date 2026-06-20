@@ -35,21 +35,44 @@ class EmbeddingProvider(ABC):
         return float(np.dot(va, vb) / denom)
 
 
+# Process-wide cache of loaded SentenceTransformer models, keyed by model name.
+# A model load is expensive (hundreds of MB), so seeding and retrieval share a
+# single in-memory instance per model name across all provider instances.
+_MODEL_CACHE: dict[str, object] = {}
+
+
+def _load_model(model_name: str):
+    """Load (or return the cached) SentenceTransformer for ``model_name``.
+
+    LAZY-imports ``sentence-transformers`` so importing this module stays cheap.
+    The loaded model is memoized module-wide so it behaves as a singleton.
+    """
+    model = _MODEL_CACHE.get(model_name)
+    if model is None:
+        from sentence_transformers import SentenceTransformer
+
+        model = SentenceTransformer(model_name)
+        _MODEL_CACHE[model_name] = model
+    return model
+
+
 class LocalEmbeddingProvider(EmbeddingProvider):
-    """Local sentence-transformers embedding provider (DEFAULT)."""
+    """Local sentence-transformers embedding provider (DEFAULT).
+
+    Defaults to BAAI/bge-small-en-v1.5 (384-dim). The underlying model is a
+    process-wide singleton (see :func:`_load_model`), so constructing many
+    providers never reloads the weights.
+    """
 
     def __init__(self) -> None:
         from app.config import settings
 
         self.model_name: str = settings.embedding_model
-        self._model = None  # loaded lazily on first use
+        self._model = None  # resolved from the shared cache on first use
 
     def _ensure_model(self):
         if self._model is None:
-            # LAZY import: only require sentence-transformers when invoked.
-            from sentence_transformers import SentenceTransformer
-
-            self._model = SentenceTransformer(self.model_name)
+            self._model = _load_model(self.model_name)
         return self._model
 
     def embed(self, text: str) -> list[float]:
