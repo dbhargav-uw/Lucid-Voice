@@ -202,6 +202,7 @@ def generate(req: GenerateRequest) -> GenerateResponse:
             "provider": {"llm": settings.llm_provider, "model": settings.lm_studio_model},
             "abstain": True,
             "rationales": [],
+            "candidates": [],
             "topk": r.get("topk", []),
         }
         latest_trace = trace
@@ -220,6 +221,20 @@ def generate(req: GenerateRequest) -> GenerateResponse:
         "provider": {"llm": settings.llm_provider, "model": settings.lm_studio_model},
         "abstain": False,
         "rationales": [c.get("rationale", "") for c in candidates],
+        # Candidates are added to the (free-form) trace dict so the laptop
+        # GraphView — which only observes /trace/latest — can render the
+        # candidate panel and emphasize grounded nodes. This is NOT an API
+        # contract change (trace is typed `dict`).
+        "candidates": [
+            {
+                "text": c.get("text", ""),
+                "register": c.get("register", "neutral"),
+                "length_label": c.get("length_label", "medium"),
+                "rationale": c.get("rationale", ""),
+                "grounded_node_ids": c.get("grounded_node_ids", []),
+            }
+            for c in candidates
+        ],
         "topk": r.get("topk", []),
     }
     latest_trace = trace
