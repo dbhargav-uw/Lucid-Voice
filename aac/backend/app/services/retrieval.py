@@ -1,117 +1,301 @@
-"""RetrievalService — grounding context assembly (Phase 3).
+"""RetrievalService — hybrid GraphRAG grounding (Phase 3).
 
-Turns sparse user fragments plus situational context into a grounded context
-block for generation. It anchors the fragments into the graph, expands the
-neighborhood, blends in vector (semantic) retrieval, reranks the candidates,
-and assembles a context block plus a ``RetrievalInfo``-shaped dict.
+Turns sparse fragments + situational context into a grounded RETRIEVED FACTS
+block plus a ``RetrievalInfo``-shaped dict, by fusing:
 
-``sentence-transformers`` (and any other heavy dep) must be LAZY-imported
-inside methods, never at module top-level.
+  1. Anchor extraction — LLM NER over fragments + context, entity-linked to graph
+     nodes by exact/fuzzy label match and embedding cosine; plus direct linking
+     of any partner/contact name found in the context or situation.
+  2. Graph expansion — multi-hop ``graph.neighborhood`` traversal from anchors.
+  3. Vector retrieval — embed the full query, cosine over all of the person's
+     node embeddings, union the nearest into the subgraph.
+  4. Re-rank — score = a*graph_proximity + b*edge_weight_norm + c*recency +
+     d*semantic, every component normalized to [0, 1]; keep top_k.
+  5. Confidence gate — confidence = 0.5*(any anchor matched) + 0.5*(max semantic
+     over top_k); below ``confidence_threshold`` ⇒ abstain ("ask for one word").
+  6. Assemble a human-readable RETRIEVED FACTS block (with node ids) for the
+     generation prompt.
 
-Confidence gate: when the reranked evidence is too weak (low graph proximity
-and low semantic similarity, few anchors), ``retrieve`` reports a low
-confidence so the caller can ABSTAIN rather than hallucinate.
+Heavy deps are reached only through the injected providers/graph service.
 """
 
 from __future__ import annotations
 
+import difflib
+import json
+import math
+import re
+from datetime import datetime, timezone
 from typing import Any
+
+import numpy as np
+
+from app.config import settings
+
+# Recency time-constant (seconds). recency = exp(-(now - last_seen) / TAU).
+RECENCY_TAU_SECONDS = 7 * 24 * 3600  # ~7 days
+
+# Anchor entity-linking thresholds.
+# Exact/word/fuzzy label matching is the primary, precise path. Embedding-only
+# linking is a fallback: bge-small compresses cosines into ~0.5-0.77, so an
+# embedding link must clear a high absolute bar AND beat the runner-up by a
+# margin — this rejects ambiguous matches (e.g. "tired"→cold, which barely
+# edges out routine_nap) while exact matches (cold, window, play, dinner) are
+# unaffected because they never reach this fallback.
+_FUZZY_THRESHOLD = 0.86          # difflib ratio for label match
+_ANCHOR_SEMANTIC_THRESHOLD = 0.62  # min cosine for an embedding-only anchor link
+_ANCHOR_SEMANTIC_MARGIN = 0.03     # best must beat 2nd-best by at least this
+
+
+def _now() -> datetime:
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+def _strip_reasoning(raw: str) -> str:
+    """Remove <think>...</think> blocks and markdown fences from model output."""
+    if not raw:
+        return ""
+    raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL | re.IGNORECASE)
+    raw = re.sub(r"```(?:json)?", "", raw)
+    return raw.strip()
+
+
+def _parse_str_list(raw: str) -> list[str]:
+    """Best-effort parse of a JSON array (or {key: array}) of strings."""
+    text = _strip_reasoning(raw)
+    start, end = text.find("["), text.rfind("]")
+    candidate = text[start : end + 1] if (start != -1 and end > start) else text
+    try:
+        data = json.loads(candidate)
+    except Exception:
+        # Last resort: try the whole thing as an object and grab its first list.
+        try:
+            data = json.loads(text)
+        except Exception:
+            return []
+    if isinstance(data, dict):
+        for v in data.values():
+            if isinstance(v, list):
+                data = v
+                break
+        else:
+            return []
+    if not isinstance(data, list):
+        return []
+    return [str(x).strip() for x in data if str(x).strip()]
+
+
+def _cos(a: np.ndarray, b: np.ndarray) -> float:
+    denom = float(np.linalg.norm(a) * np.linalg.norm(b))
+    if denom == 0.0:
+        return 0.0
+    return float(np.dot(a, b) / denom)
 
 
 class RetrievalService:
     """Assembles grounded context for generation from the graph + vectors."""
 
     def __init__(self, graph: Any, llm: Any, embedding: Any) -> None:
-        """Wire up collaborating services.
-
-        Args:
-            graph: A :class:`~app.services.graph.GraphService` instance.
-            llm: The LLM client (used for anchor extraction / query shaping).
-            embedding: The embedding provider for vector retrieval.
-        """
         self.graph = graph
         self.llm = llm
         self.embedding = embedding
 
+    # --- 1) anchor extraction ----------------------------------------------
+
+    def _llm_mentions(self, fragments: list[str], context: str) -> list[str]:
+        """Ask the LLM to list entity mentions. Degrades to [] on any failure."""
+        system = "You extract entities. Return ONLY a JSON array of short strings, no prose."
+        user = (
+            "From the FRAGMENTS and CONTEXT below, list the distinct real-world things "
+            "being referred to or implied: people, places, topics, activities, feelings, "
+            "objects, and times. Return ONLY a JSON array of short lowercase strings.\n\n"
+            f"FRAGMENTS: {fragments}\n"
+            f"CONTEXT: {context or '(none)'}"
+        )
+        try:
+            raw = self.llm.generate(user, system=system)
+        except Exception:
+            return []
+        return _parse_str_list(raw)
+
+    def _match_mention(
+        self,
+        mention: str,
+        pnodes: dict[str, dict],
+        embs: dict[str, np.ndarray],
+        mention_emb: np.ndarray | None,
+    ) -> str | None:
+        """Link one mention string to its best node id, or None."""
+        m = mention.strip().lower()
+        if len(m) < 2:
+            return None
+        best_fuzzy_id, best_fuzzy = None, 0.0
+        for nid, nd in pnodes.items():
+            label = str(nd["label"]).lower()
+            words = re.findall(r"[a-z0-9']+", label)
+            if m == label or m in words:
+                return nid  # strong exact/word match
+            ratio = difflib.SequenceMatcher(None, m, label).ratio()
+            if ratio > best_fuzzy:
+                best_fuzzy, best_fuzzy_id = ratio, nid
+        if best_fuzzy >= _FUZZY_THRESHOLD:
+            return best_fuzzy_id
+        if mention_emb is not None:
+            sims = sorted((_cos(mention_emb, embs[nid]) for nid in pnodes), reverse=True)
+            best_sem = sims[0] if sims else 0.0
+            second = sims[1] if len(sims) > 1 else 0.0
+            if best_sem >= _ANCHOR_SEMANTIC_THRESHOLD and (best_sem - second) >= _ANCHOR_SEMANTIC_MARGIN:
+                # recompute the winning id (sorted() dropped it)
+                for nid in pnodes:
+                    if abs(_cos(mention_emb, embs[nid]) - best_sem) < 1e-9:
+                        return nid
+        return None
+
     def extract_anchors(
         self,
+        person_id: str,
         fragments: list[str],
         context: str,
-        situation: Any | None = None,
+        situation: Any | None,
+        pnodes: dict[str, dict],
+        embs: dict[str, np.ndarray],
     ) -> list[str]:
-        """Map fragments + situation to anchor node ids in the graph.
+        """Map fragments + context + situation to anchor node ids."""
+        # Mentions = the user's own fragments + LLM-extracted entities.
+        mentions: list[str] = [f for f in fragments if f and f.strip()]
+        mentions += self._llm_mentions(fragments, context)
+        # De-dup preserving order.
+        seen_m: set[str] = set()
+        mentions = [m for m in mentions if not (m.lower() in seen_m or seen_m.add(m.lower()))]
 
-        Anchors are the entry points (people, places, topics) the fragments
-        most directly reference; they seed graph expansion.
+        mention_embs: dict[str, np.ndarray] = {}
+        if mentions:
+            try:
+                vecs = self.embedding.embed_batch(mentions)
+                mention_embs = {m: np.asarray(v, dtype=np.float32) for m, v in zip(mentions, vecs)}
+            except Exception:
+                mention_embs = {}
 
-        Args:
-            fragments: The user's sparse input tokens/phrases.
-            context: Free-text conversational context.
-            situation: Optional ``Situation`` (time/place/present_people).
+        anchors: list[str] = []
+        for m in mentions:
+            nid = self._match_mention(m, pnodes, embs, mention_embs.get(m))
+            if nid and nid not in anchors:
+                anchors.append(nid)
 
-        Returns:
-            A list of anchor node ids.
+        # Direct partner/contact linking from context text + situation.
+        haystack = (context or "").lower()
+        present = []
+        if situation is not None:
+            present = list(getattr(situation, "present_people", None) or [])
+        present_l = " ".join(str(p).lower() for p in present)
+        for nid, nd in pnodes.items():
+            if nd["kind"] != "contact":
+                continue
+            name = str(nd["label"]).lower()
+            if re.search(rf"\b{re.escape(name)}\b", haystack) or (name and name in present_l):
+                if nid not in anchors:
+                    anchors.append(nid)
+        return anchors
 
-        # TODO Phase 3: entity-link fragments/situation to graph node ids.
+    def _detect_partner(
+        self,
+        context: str,
+        situation: Any | None,
+        pnodes: dict[str, dict],
+        partner_by_term: dict[str, str],
+    ) -> str | None:
+        """Identify the conversation partner's contact id, if discernible.
+
+        Order: (1) by how they address the speaker ("Mom" → Sofia, "Grandma" →
+        Mateo), (2) by a present_people name, (3) by a contact name in context.
         """
-        # TODO Phase 3: implement anchor extraction / entity linking.
-        return []
+        hay = (context or "").lower()
+        for term, cid in partner_by_term.items():
+            if term and re.search(rf"\b{re.escape(term)}\b", hay):
+                return cid
+        present = []
+        if situation is not None:
+            present = [str(p).lower() for p in (getattr(situation, "present_people", None) or [])]
+        for nid, nd in pnodes.items():
+            if nd["kind"] == "contact" and str(nd["label"]).lower() in present:
+                return nid
+        for nid, nd in pnodes.items():
+            if nd["kind"] == "contact":
+                name = str(nd["label"]).lower()
+                if name and re.search(rf"\b{re.escape(name)}\b", hay):
+                    return nid
+        return None
 
-    def expand_graph(self, anchor_ids: list[str], hops: int = 2) -> dict[str, Any]:
-        """Expand a subgraph around the anchors via the graph service.
+    # --- 3) vector retrieval -----------------------------------------------
 
-        Args:
-            anchor_ids: Seed node ids from :meth:`extract_anchors`.
-            hops: Traversal depth.
+    def vector_retrieve(
+        self, query_emb: np.ndarray, embs: dict[str, np.ndarray], top_n: int
+    ) -> list[tuple[str, float]]:
+        """Top-N (node_id, semantic) by cosine over all node embeddings."""
+        scored = [(nid, max(0.0, _cos(query_emb, v))) for nid, v in embs.items()]
+        scored.sort(key=lambda t: t[1], reverse=True)
+        return scored[:top_n]
 
-        Returns:
-            A ``{"nodes": [...], "edges": [...]}`` subgraph dict.
+    # --- 6) facts assembly --------------------------------------------------
 
-        # TODO Phase 3: delegate to graph.neighborhood(anchor_ids, hops).
-        """
-        # TODO Phase 3: implement subgraph expansion.
-        return {"nodes": [], "edges": []}
+    def _assemble_facts(
+        self,
+        topk_ids: list[str],
+        pnodes: dict[str, dict],
+        addr_term: dict[str, str],
+        partner_id: str | None = None,
+    ) -> str:
+        """Human-readable RETRIEVED FACTS block, each line tagged with its id."""
+        order = ["contact", "preference", "routine", "phrase", "need", "topic", "place", "event", "user"]
 
-    def vector_retrieve(self, query_text: str) -> list[dict[str, Any]]:
-        """Retrieve semantically similar nodes/phrases via embeddings.
+        def line(nid: str) -> str:
+            nd = pnodes[nid]
+            kind, label = nd["kind"], nd["label"]
+            if kind == "contact":
+                # The partner (the listener) is shown separately below with their
+                # term of address. Other contacts are only *mentioned*, so we do
+                # NOT surface their address term — that would compete with the
+                # partner's (e.g. "sweetie" leaking in when talking to Mateo).
+                return f"[{nid}] {label} is someone in your life."
+            if kind == "preference":
+                return f"[{nid}] Preference: {label}."
+            if kind == "routine":
+                return f"[{nid}] Routine: {label}."
+            if kind == "phrase":
+                return f'[{nid}] You often say: "{label}".'
+            if kind == "need":
+                return f"[{nid}] Possible need: {label}."
+            if kind == "topic":
+                return f"[{nid}] Topic that matters to you: {label}."
+            if kind == "place":
+                return f"[{nid}] Place: {label}."
+            if kind == "user":
+                return f"[{nid}] Speaker: {label}."
+            return f"[{nid}] {label}."
 
-        LAZY-imports ``sentence-transformers`` inside this method.
+        lines: list[str] = []
+        # Lead with the identified partner so generation addresses them right.
+        shown: set[str] = set()
+        if partner_id and partner_id in pnodes:
+            nd = pnodes[partner_id]
+            term = addr_term.get(partner_id)
+            p = f"[{partner_id}] PARTNER: You are speaking with {nd['label']}"
+            if term:
+                p += f', whom you call "{term}" — address them this way'
+            lines.append(p + ".")
+            shown.add(partner_id)
 
-        Args:
-            query_text: Text to embed and search against stored vectors.
+        by_kind: dict[str, list[str]] = {}
+        for nid in topk_ids:
+            if nid in shown:
+                continue
+            by_kind.setdefault(pnodes[nid]["kind"], []).append(nid)
+        for kind in order:
+            for nid in by_kind.get(kind, []):
+                lines.append(line(nid))
+        return "\n".join(lines) if lines else "(no specific facts retrieved)"
 
-        Returns:
-            A list of candidate node dicts with a ``semantic_sim`` score.
-
-        # TODO Phase 3: embed query, do nearest-neighbor search over stored
-        #               node/phrase embeddings.
-        """
-        # TODO Phase 3: implement vector retrieval.
-        # from sentence_transformers import SentenceTransformer
-        return []
-
-    def rerank(self, nodes: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        """Rerank candidate nodes by a weighted relevance score.
-
-        Score formula::
-
-            score = a * graph_proximity
-                  + b * edge_weight
-                  + c * recency
-                  + d * semantic_sim
-
-        where (a, b, c, d) are tunable coefficients. Higher is more relevant.
-
-        Args:
-            nodes: Candidate node dicts carrying the component scores.
-
-        Returns:
-            The nodes sorted by descending score.
-
-        # TODO Phase 3: compute the weighted score and sort.
-        """
-        # TODO Phase 3: implement reranking.
-        return nodes
+    # --- orchestration ------------------------------------------------------
 
     def retrieve(
         self,
@@ -120,46 +304,138 @@ class RetrievalService:
         context: str = "",
         situation: Any | None = None,
     ) -> dict[str, Any]:
-        """Run the full retrieval pipeline and assemble grounding context.
-
-        Pipeline: extract_anchors -> expand_graph -> vector_retrieve ->
-        rerank -> assemble a human-readable context block.
-
-        Confidence / abstain gate: ``confidence`` summarizes evidence
-        strength (anchor count, top rerank score, semantic similarity). The
-        caller (GenerationService / the /generate endpoint) should ABSTAIN
-        when ``confidence`` falls below the configured threshold.
-
-        Args:
-            person_id: Owning person's id.
-            fragments: The user's sparse input.
-            context: Free-text conversational context.
-            situation: Optional ``Situation``.
-
-        Returns:
-            A dict::
-
-                {
-                    "context_block": str,           # assembled facts text
-                    "retrieval": {                  # RetrievalInfo shape
-                        "anchor_ids": [...],
-                        "subgraph_node_ids": [...],
-                        "subgraph_edge_ids": [...],
-                        "confidence": float,
-                    },
-                    "confidence": float,            # convenience copy
-                }
-
-        # TODO Phase 3: run pipeline, build context_block, compute confidence.
-        """
-        # TODO Phase 3: implement the full retrieval pipeline.
-        return {
+        """Run the full hybrid pipeline; return facts + RetrievalInfo + flags."""
+        empty = {
             "context_block": "",
-            "retrieval": {
-                "anchor_ids": [],
-                "subgraph_node_ids": [],
-                "subgraph_edge_ids": [],
-                "confidence": 0.0,
-            },
+            "retrieval": {"anchor_ids": [], "subgraph_node_ids": [],
+                          "subgraph_edge_ids": [], "confidence": 0.0},
             "confidence": 0.0,
+            "abstain": True,
+            "abstain_reason": "I don't have enough to go on yet — add one more word.",
+            "grounded_ids": [],
+            "topk": [],
+        }
+        if self.graph is None:
+            return empty
+
+        pnode_list = self.graph.person_nodes(person_id)
+        if not pnode_list:
+            return empty
+        pnodes: dict[str, dict] = {n["id"]: n for n in pnode_list}
+        embs: dict[str, np.ndarray] = {
+            n["id"]: np.asarray(n["embedding"], dtype=np.float32) for n in pnode_list
+        }
+        pedges = self.graph.person_edges(person_id)
+        # How the speaker addresses each contact (forward: user -> contact).
+        addr_term = {
+            e["target"]: e["term"]
+            for e in pedges
+            if e["type"] == "addresses_as" and e.get("term")
+            and pnodes.get(e["target"], {}).get("kind") == "contact"
+        }
+        # How each contact addresses the speaker (reverse: contact -> user) —
+        # used to identify the partner from how they open ("Mom..." -> Sofia).
+        partner_by_term = {
+            str(e["term"]).lower(): e["source"]
+            for e in pedges
+            if e["type"] == "addresses_as" and e.get("term")
+            and pnodes.get(e["target"], {}).get("kind") == "user"
+        }
+
+        # query embedding (fragments + context)
+        query_text = " ".join([*(fragments or []), context or ""]).strip()
+        try:
+            query_emb = np.asarray(self.embedding.embed(query_text), dtype=np.float32)
+        except Exception:
+            query_emb = np.zeros(next(iter(embs.values())).shape, dtype=np.float32)
+        semantic = {nid: max(0.0, _cos(query_emb, v)) for nid, v in embs.items()}
+
+        # 1) anchors (+ identify the conversation partner, who leads ranking)
+        partner_id = self._detect_partner(context, situation, pnodes, partner_by_term)
+        anchors = self.extract_anchors(person_id, fragments, context, situation, pnodes, embs)
+        if partner_id:
+            anchors = [partner_id] + [a for a in anchors if a != partner_id]
+
+        # 2) graph expansion
+        nb = self.graph.neighborhood(anchors, settings.retrieval_hops) if anchors else \
+            {"node_ids": [], "edge_ids": [], "hops": {}}
+        hops_map: dict[str, int] = dict(nb.get("hops", {}))
+
+        # 3) vector retrieval (union into the subgraph)
+        top_n = int(settings.retrieval_top_k)
+        vec_top = self.vector_retrieve(query_emb, embs, top_n)
+        vec_ids = [nid for nid, _ in vec_top]
+
+        candidate_ids = list(dict.fromkeys([*anchors, *nb.get("node_ids", []), *vec_ids]))
+
+        # edge weight normalization (best incident weight / global max)
+        best_incident: dict[str, float] = {}
+        global_max_w = 1.0
+        for e in pedges:
+            w = float(e["weight"] or 0.0)
+            global_max_w = max(global_max_w, w)
+            for nid in (e["source"], e["target"]):
+                best_incident[nid] = max(best_incident.get(nid, 0.0), w)
+
+        # 4) re-rank
+        a, b, c, d = (settings.rank_alpha, settings.rank_beta,
+                      settings.rank_gamma, settings.rank_delta)
+        now = _now()
+        decay = float(settings.decay_factor)
+        ranked: list[dict[str, Any]] = []
+        for nid in candidate_ids:
+            nd = pnodes.get(nid)
+            if nd is None:
+                continue
+            hop = 0 if nid in anchors else hops_map.get(nid)
+            graph_prox = (decay ** hop) if hop is not None else 0.0
+            ew = best_incident.get(nid, 0.0) / global_max_w
+            last_seen = nd["last_seen"]
+            if isinstance(last_seen, datetime):
+                dt = max(0.0, (now - last_seen).total_seconds())
+                recency = math.exp(-dt / RECENCY_TAU_SECONDS)
+            else:
+                recency = 0.0
+            sem = semantic.get(nid, 0.0)
+            score = a * graph_prox + b * ew + c * recency + d * sem
+            ranked.append({
+                "id": nid, "label": nd["label"], "kind": nd["kind"],
+                "score": round(score, 4), "graph_proximity": round(graph_prox, 4),
+                "edge_weight_norm": round(ew, 4), "recency": round(recency, 4),
+                "semantic": round(sem, 4), "hop": hop,
+            })
+        ranked.sort(key=lambda r: r["score"], reverse=True)
+        topk = ranked[: int(settings.retrieval_top_k)]
+        topk_ids = [r["id"] for r in topk]
+
+        # subgraph = union of expansion + vector nodes; edges among that set
+        subgraph_node_ids = candidate_ids
+        subgraph_edges = self.graph._fetch_edges_among(subgraph_node_ids)
+        subgraph_edge_ids = [e["id"] for e in subgraph_edges]
+
+        # 5) confidence gate
+        any_anchor = 1.0 if anchors else 0.0
+        max_sem_topk = max((r["semantic"] for r in topk), default=0.0)
+        confidence = round(0.5 * any_anchor + 0.5 * max_sem_topk, 4)
+        abstain = confidence < float(settings.confidence_threshold)
+
+        # 6) facts block (partner leads); partner is always a valid grounding id
+        context_block = self._assemble_facts(topk_ids, pnodes, addr_term, partner_id)
+        grounded_ids = topk_ids + ([partner_id] if partner_id and partner_id not in topk_ids else [])
+
+        return {
+            "context_block": context_block,
+            "retrieval": {
+                "anchor_ids": anchors,
+                "subgraph_node_ids": subgraph_node_ids,
+                "subgraph_edge_ids": subgraph_edge_ids,
+                "confidence": confidence,
+            },
+            "confidence": confidence,
+            "abstain": abstain,
+            "abstain_reason": (
+                "I don't have enough to go on yet — add one more word." if abstain else None
+            ),
+            "grounded_ids": grounded_ids,
+            "topk": topk,
         }
