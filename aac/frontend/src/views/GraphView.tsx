@@ -5,14 +5,17 @@
 // nodes emphasized most) and shows the candidates with their grounded labels.
 
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useReducedMotion } from "framer-motion";
 import ForceGraph, {
   KIND_COLORS,
   type FGNode,
   type FGLink,
   type GraphData,
   type Highlight,
+  type Growth,
 } from "../components/ForceGraph";
 import { getGraph, generate } from "../lib/api";
+import { DUR, EASE_OUT } from "../lib/motion";
 
 const PERSON_ID = "elena";
 const POLL_MS = 600;
@@ -81,8 +84,17 @@ export default function GraphView() {
   const [dims, setDims] = useState({ w: 0, h: 0 });
   const [triggering, setTriggering] = useState<string | null>(null);
 
+  // Memory growth: "after" = full current graph; "start" = sparse first-degree
+  // subset. `t` (0 -> 1) is animated by rAF and interpolates the rendered data.
+  const [mode, setMode] = useState<"start" | "after">("after");
+  const [t, setT] = useState(1);
+  const reduceMotion = useReducedMotion();
+
   const containerRef = useRef<HTMLDivElement>(null);
   const traceSig = useRef<string>("");
+  const rafRef = useRef<number | null>(null);
+  const tRef = useRef(t);
+  tRef.current = t;
 
   // --- load the graph once ---
   useEffect(() => {
@@ -204,12 +216,80 @@ export default function GraphView() {
     [data],
   );
 
+  // --- "session start" subset: deterministic first-degree neighborhood of the
+  // user (Elena) - the user node plus every node directly linked to them, and
+  // every edge incident to the user. That is the sparse "what we knew at the
+  // start of the session" graph; the rest is what got "learned". ---
+  const core = useMemo(() => {
+    const coreNodeIds = new Set<string>();
+    const coreEdgeIds = new Set<string>();
+    if (!data) return { coreNodeIds, coreEdgeIds };
+    const userIds = new Set(data.nodes.filter((n) => n.kind === "user").map((n) => n.id));
+    userIds.forEach((id) => coreNodeIds.add(id));
+    const ref = (e: string | FGNode) => (typeof e === "string" ? e : e.id);
+    for (const l of data.links) {
+      const s = ref(l.source);
+      const tg = ref(l.target);
+      if (userIds.has(s) || userIds.has(tg)) {
+        coreEdgeIds.add(l.id);
+        coreNodeIds.add(s);
+        coreNodeIds.add(tg);
+      }
+    }
+    return { coreNodeIds, coreEdgeIds };
+  }, [data]);
+
+  // --- animate `t` toward the target mode (1 = after, 0 = start). Snap under
+  // reduced motion; otherwise an eased rAF ramp drives the grow/recede. ---
+  useEffect(() => {
+    const target = mode === "after" ? 1 : 0;
+    if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
+    if (reduceMotion) {
+      setT(target);
+      return;
+    }
+    const from = tRef.current;
+    if (Math.abs(from - target) < 0.001) return;
+    const dur = DUR.moment * 2.4 * 1000; // a deliberate, legible consolidation
+    const start = performance.now();
+    const step = (now: number) => {
+      const p = Math.min(1, (now - start) / dur);
+      const e = ease(p);
+      setT(from + (target - from) * e);
+      if (p < 1) rafRef.current = requestAnimationFrame(step);
+      else rafRef.current = null;
+    };
+    rafRef.current = requestAnimationFrame(step);
+    return () => {
+      if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
+    };
+  }, [mode, reduceMotion]);
+
+  const growth = useMemo<Growth>(
+    () => ({ coreNodeIds: core.coreNodeIds, coreEdgeIds: core.coreEdgeIds, t }),
+    [core, t],
+  );
+
+  // Caption counts: full graph vs the sparse session-start subset.
+  const startCount = core.coreNodeIds.size;
+  const fullCount = data?.nodes.length ?? 0;
+  const caption =
+    mode === "after"
+      ? `After learning: ${fullCount} memories, stronger links.`
+      : `Session start: ${startCount} memories.`;
+
   return (
     <div style={{ display: "flex", height: "100%", background: INK, color: TEXT }}>
       {/* Graph canvas */}
       <div ref={containerRef} style={{ position: "relative", flex: 1, minWidth: 0, background: INK }}>
         {data && dims.w > 0 && dims.h > 0 ? (
-          <ForceGraph data={data} width={dims.w} height={dims.h} highlight={highlight} />
+          <ForceGraph
+            data={data}
+            width={dims.w}
+            height={dims.h}
+            highlight={highlight}
+            growth={growth}
+          />
         ) : (
           <div
             style={{
@@ -238,6 +318,86 @@ export default function GraphView() {
             >
               {highlight.active ? "firing" : "idle"}
             </span>
+          </div>
+        </div>
+
+        {/* Memory growth toggle (top-right) */}
+        <div
+          style={{
+            ...overlay("top"),
+            left: "auto",
+            right: 14,
+            display: "flex",
+            flexDirection: "column",
+            gap: 8,
+            maxWidth: 320,
+          }}
+        >
+          <div
+            style={{
+              fontSize: 10.5,
+              letterSpacing: "0.1em",
+              textTransform: "uppercase",
+              color: TEXT_MUTED,
+              fontWeight: 600,
+            }}
+          >
+            Memory growth
+          </div>
+          <div
+            role="radiogroup"
+            aria-label="Memory growth stage"
+            style={{
+              display: "inline-flex",
+              padding: 3,
+              gap: 3,
+              borderRadius: 10,
+              background: INK,
+              border: `1px solid ${INK_LINE}`,
+            }}
+          >
+            {(
+              [
+                { key: "start", label: "Session start" },
+                { key: "after", label: "After learning" },
+              ] as const
+            ).map((opt) => {
+              const on = mode === opt.key;
+              return (
+                <button
+                  key={opt.key}
+                  type="button"
+                  role="radio"
+                  aria-checked={on}
+                  onClick={() => setMode(opt.key)}
+                  style={{
+                    fontFamily:
+                      "ui-monospace, SFMono-Regular, Menlo, monospace",
+                    fontSize: 12,
+                    padding: "6px 11px",
+                    borderRadius: 8,
+                    border: `1px solid ${on ? MIND : "transparent"}`,
+                    background: on ? MIND_SOFT : "transparent",
+                    color: on ? "#075E55" : TEXT_MUTED,
+                    fontWeight: on ? 600 : 500,
+                    cursor: "pointer",
+                    transition: `background ${DUR.fast}s, color ${DUR.fast}s`,
+                  }}
+                >
+                  {opt.label}
+                </button>
+              );
+            })}
+          </div>
+          <div
+            aria-live="polite"
+            style={{
+              fontSize: 12,
+              color: TEXT_MUTED,
+              lineHeight: 1.45,
+            }}
+          >
+            {caption}
           </div>
         </div>
 
@@ -415,6 +575,31 @@ export default function GraphView() {
       </aside>
     </div>
   );
+}
+
+// Evaluate the shared EASE_OUT cubic-bezier (0.16, 1, 0.3, 1) at progress p.
+// Newton-step solve for the curve parameter, then read its y. Keeps the growth
+// ramp on the same easing language as the rest of the app (lib/motion).
+function ease(p: number): number {
+  const [x1, y1, x2, y2] = EASE_OUT;
+  if (p <= 0) return 0;
+  if (p >= 1) return 1;
+  const cx = (u: number) =>
+    ((1 - u) ** 2 * 3 * u * x1) + ((1 - u) * 3 * u * u * x2) + u ** 3;
+  const cy = (u: number) =>
+    ((1 - u) ** 2 * 3 * u * y1) + ((1 - u) * 3 * u * u * y2) + u ** 3;
+  let u = p;
+  for (let i = 0; i < 6; i++) {
+    const x = cx(u) - p;
+    const dx =
+      3 * (1 - u) ** 2 * x1 +
+      6 * (1 - u) * u * (x2 - x1) +
+      3 * u * u * (1 - x2);
+    if (Math.abs(dx) < 1e-5) break;
+    u -= x / dx;
+    u = Math.min(1, Math.max(0, u));
+  }
+  return cy(u);
 }
 
 function overlay(pos: "top" | "bottom"): CSSProperties {

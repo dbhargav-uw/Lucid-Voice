@@ -76,6 +76,17 @@ export interface Highlight {
   groundedIds: Set<string>;
 }
 
+// Memory growth (the learning loop). `coreNodeIds` / `coreEdgeIds` are the
+// sparse "session start" subset that is fully present at t=0. Everything else
+// is a "learned" node/edge that grows in as `t` goes 0 -> 1. Core edges also
+// thicken from a hint of their weight toward their full weight-scaled width.
+// `t` is interpolated by the parent (rAF / snapped under reduced motion).
+export interface Growth {
+  coreNodeIds: Set<string>;
+  coreEdgeIds: Set<string>;
+  t: number; // 0 = session start, 1 = after learning
+}
+
 function nodeRadius(n: FGNode): number {
   const base = n.kind === "user" ? 11 : 5.5;
   const s = Math.min(2, Math.max(0.4, n.salience ?? 1));
@@ -90,11 +101,13 @@ export default function ForceGraph({
   width,
   height,
   highlight,
+  growth,
 }: {
   data: GraphData;
   width: number;
   height: number;
   highlight: Highlight;
+  growth?: Growth;
 }) {
   const fgRef = useRef<any>(null);
   const [hovered, setHovered] = useState<string | null>(null);
@@ -118,10 +131,22 @@ export default function ForceGraph({
   // Particles fire only while a trace is active and motion is allowed.
   const particlesOn = hi && !reduceMotion;
 
+  // Growth membership. When no growth prop is supplied every node/edge is
+  // treated as "core" so behavior is identical to before this feature.
+  const tg = growth ? growth.t : 1;
+  const isCoreNode = (id: string) => (growth ? growth.coreNodeIds.has(id) : true);
+  const isCoreEdge = (id: string) => (growth ? growth.coreEdgeIds.has(id) : true);
+  // Per-element growth factor (0..1): core elements are always 1; learned ones
+  // ramp with t. smoothstep keeps the fade/scale calm rather than linear.
+  const grow = (core: boolean) => (core ? 1 : smoothstep(tg));
+
   const nodeCanvas = (node: any, ctx: CanvasRenderingContext2D, scale: number) => {
     const n = node as FGNode;
     const color = KIND_COLORS[n.kind] ?? DEFAULT_COLOR;
-    const r = nodeRadius(n);
+    // Growth: learned nodes fade + scale in (0.4 -> full radius) as t rises.
+    const g = grow(isCoreNode(n.id));
+    if (g <= 0.001) return; // not yet learned: skip entirely at session start
+    const r = nodeRadius(n) * (0.4 + 0.6 * g);
     const isUser = n.kind === "user";
     const inSub = highlight.subgraphNodeIds.has(n.id);
     const isAnchor = highlight.anchorIds.has(n.id);
@@ -135,6 +160,7 @@ export default function ForceGraph({
     if (!hi) alpha = 1;
     else if (lit) alpha = 1;
     else alpha = 0.22;
+    alpha *= g; // learned nodes fade in with growth
 
     // Clean filled circle.
     ctx.save();
@@ -189,7 +215,7 @@ export default function ForceGraph({
       const ty = n.y! + r + 3 / scale;
       const padX = 4 / scale;
       const padY = 2 / scale;
-      const labelAlpha = !hi || lit || hovered === n.id ? 1 : 0.4;
+      const labelAlpha = (!hi || lit || hovered === n.id ? 1 : 0.4) * g;
 
       ctx.save();
       ctx.globalAlpha = labelAlpha;
@@ -230,8 +256,18 @@ export default function ForceGraph({
     const w = Number(link.weight ?? 1);
     // Reinforcement: stronger memories = stronger connections (width + opacity).
     const ww = Math.min(4, Math.max(0.4, w));
-    const baseWidth = 0.5 + ww * 0.45;
-    const weightAlpha = 0.3 + (ww / 4) * 0.4; // 0.3 .. 0.7
+    const fullWidth = 0.5 + ww * 0.45;
+
+    // Growth: learned edges fade in; core edges thicken from a thin hint toward
+    // their full weight-scaled width as t rises (memory consolidation). At
+    // session start (t=0) learned edges are absent and core edges are thin.
+    const core = isCoreEdge(link.id);
+    const g = grow(core);
+    if (g <= 0.001) return; // learned edge not yet present at session start
+    // Reinforcement of the persistent core edges: width animates with t.
+    const tw = core ? 0.35 + 0.65 * smoothstep(tg) : 1;
+    const baseWidth = fullWidth * tw;
+    const weightAlpha = (0.3 + (ww / 4) * 0.4) * (core ? 1 : g); // 0.3 .. 0.7
 
     let alpha: number;
     let width = baseWidth;
@@ -242,9 +278,9 @@ export default function ForceGraph({
     } else if (inSub) {
       width = baseWidth * 2.1;
       color = LINK_RETRIEVED;
-      alpha = 0.9;
+      alpha = 0.9 * (core ? 1 : g);
     } else {
-      alpha = 0.08;
+      alpha = 0.08 * (core ? 1 : g);
     }
     ctx.globalAlpha = alpha;
     ctx.strokeStyle = color;
@@ -277,8 +313,9 @@ export default function ForceGraph({
       backgroundColor={BG}
       nodeId="id"
       // Keep redraw running while a retrieval is highlighted (rings breathe and
-      // particles fly); pause when idle for performance.
-      autoPauseRedraw={!hi}
+      // particles fly) or while the growth transition is mid-flight; pause when
+      // fully idle and growth is settled (t at 0 or 1) for performance.
+      autoPauseRedraw={!hi && (tg <= 0.001 || tg >= 0.999)}
       cooldownTicks={220}
       warmupTicks={60}
       onEngineStop={() => {
@@ -303,6 +340,12 @@ export default function ForceGraph({
       linkDirectionalParticleColor={() => VOICE}
     />
   );
+}
+
+// Smooth 0..1 ramp (Hermite) so growth fade/scale eases in/out, not linear.
+function smoothstep(x: number): number {
+  const c = Math.min(1, Math.max(0, x));
+  return c * c * (3 - 2 * c);
 }
 
 // Small rounded-rect helper for label pills (scale-aware radius passed in).

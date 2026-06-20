@@ -21,9 +21,13 @@ import ConstructionStrip from "../components/ConstructionStrip";
 import CandidateCard from "../components/CandidateCard";
 import StateIndicator from "../components/StateIndicator";
 import ReasoningRail, { type RailData } from "../components/ReasoningRail";
+import QuickPhrases from "../components/QuickPhrases";
+import NextFragments from "../components/NextFragments";
+import ToneDial, { type Tone } from "../components/ToneDial";
+import StageOverlay from "../components/StageOverlay";
 import useSpeak from "../hooks/useSpeak";
 import { confirm, generate } from "../lib/api";
-import type { Candidate } from "../lib/api";
+import type { Candidate, Register } from "../lib/api";
 import { demoGenerate, demoReasoning, type DemoReasoning } from "../lib/demo";
 
 type SpeakerStateName =
@@ -43,6 +47,28 @@ const HEARD_PRESETS = [
   "Grandma, will you play with me?",
   "Nothing yet",
 ];
+
+// Tone → preferred register order. Candidates are sorted (stably) so the
+// emphasized register floats to the top; "even" preserves the original order.
+const TONE_REGISTER_PRIORITY: Record<Tone, Register[]> = {
+  warm: ["warm", "neutral", "direct"],
+  even: [],
+  direct: ["direct", "neutral", "warm"],
+  playful: ["warm", "neutral", "direct"],
+};
+
+function orderByTone(candidates: Candidate[], tone: Tone): Candidate[] {
+  const priority = TONE_REGISTER_PRIORITY[tone];
+  if (priority.length === 0) return candidates;
+  const rank = (r: Register) => {
+    const idx = priority.indexOf(r);
+    return idx === -1 ? priority.length : idx;
+  };
+  return candidates
+    .map((c, i) => ({ c, i }))
+    .sort((a, b) => rank(a.c.register) - rank(b.c.register) || a.i - b.i)
+    .map((x) => x.c);
+}
 
 // Coerce whatever the backend / demo put in `trace` into RailData.
 function railFromTrace(
@@ -75,6 +101,9 @@ export default function SpeakerView() {
   const [rail, setRail] = useState<RailData | null>(null);
   const [selectedIdx, setSelectedIdx] = useState<number | null>(null);
   const [abstainMsg, setAbstainMsg] = useState<string>("");
+  const [tone, setTone] = useState<Tone>("even");
+  // Stage mode: the chosen/quick-phrase sentence shown full-bleed.
+  const [stageText, setStageText] = useState<string | null>(null);
 
   const { speak, playing } = useSpeak(PERSON_ID);
 
@@ -122,15 +151,21 @@ export default function SpeakerView() {
     setAbstainMsg("");
     setRail(null);
 
+    // Demo signatures match on the raw context, so look up with the plain
+    // context but send a tone-prefixed context to the live backend.
     const req = {
       person_id: PERSON_ID,
       fragments,
       context,
     };
+    const liveReq = {
+      ...req,
+      context: tone === "even" ? context : `[tone: ${tone}] ${context}`.trim(),
+    };
 
     let live = null as Awaited<ReturnType<typeof generate>> | null;
     try {
-      live = await generate(req);
+      live = await generate(liveReq);
     } catch {
       live = null;
     }
@@ -160,7 +195,7 @@ export default function SpeakerView() {
       return;
     }
 
-    setCandidates(result.candidates);
+    setCandidates(orderByTone(result.candidates, tone));
     setRail(
       railFromTrace(
         result.trace ?? {},
@@ -176,6 +211,8 @@ export default function SpeakerView() {
   async function handleSay(candidate: Candidate, index: number) {
     setSelectedIdx(index);
     setState("speaking");
+    // Stage mode: present the chosen sentence full-bleed for the partner.
+    setStageText(candidate.text);
 
     // Fire-and-forget graph reinforcement.
     try {
@@ -188,10 +225,22 @@ export default function SpeakerView() {
       /* ignore */
     }
 
-    // Play (the only place audio is ever triggered).
+    // Play (the only place audio is ever triggered for a candidate).
     await speak(candidate.text);
     // Chosen utterance lingers; return to a calm idle.
     setState("idle");
+  }
+
+  // ── Quick Phrases — explicit one-tap speak (audio allowed on click). ──────
+  async function handleQuickPhrase(text: string) {
+    setStageText(text); // surface it on the stage overlay
+    try {
+      void confirm({ person_id: PERSON_ID, text, context });
+    } catch {
+      /* ignore */
+    }
+    // Explicit user click → speak is allowed.
+    await speak(text);
   }
 
   const ctaDisabled = fragments.length === 0 || state === "thinking";
@@ -216,6 +265,9 @@ export default function SpeakerView() {
         <div className="relative z-10 flex items-center justify-between gap-3">
           <StateIndicator state={state} />
         </div>
+
+        {/* Quick phrases rail (pinned top). */}
+        <QuickPhrases onSpeak={handleQuickPhrase} disabled={playing} />
 
         {/* Heard from partner. */}
         <div className="relative z-10 flex flex-col gap-2">
@@ -266,8 +318,13 @@ export default function SpeakerView() {
           />
         </div>
 
-        {/* CTA. */}
+        {/* Predictive next fragments (secondary to the vocab board). */}
         <div className="relative z-10">
+          <NextFragments fragments={fragments} onSuggest={handleTileTap} />
+        </div>
+
+        {/* CTA + Tone dial. */}
+        <div className="relative z-10 flex flex-wrap items-end gap-4">
           <motion.button
             type="button"
             onClick={handleGenerate}
@@ -292,6 +349,7 @@ export default function SpeakerView() {
               </>
             )}
           </motion.button>
+          <ToneDial value={tone} onChange={setTone} />
         </div>
 
         {/* Candidates / thinking skeletons / abstain. */}
@@ -380,6 +438,14 @@ export default function SpeakerView() {
       >
         <VocabBoard onTileTap={handleTileTap} />
       </section>
+
+      {/* Stage mode — full-bleed overlay for the chosen sentence. */}
+      <StageOverlay
+        open={stageText != null}
+        text={stageText ?? ""}
+        playing={playing}
+        onClose={() => setStageText(null)}
+      />
     </div>
   );
 }
