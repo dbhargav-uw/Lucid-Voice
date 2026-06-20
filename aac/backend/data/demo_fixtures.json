@@ -1,0 +1,36 @@
+{
+  "_comment": "DEMO_MODE deterministic playback fixtures. Keys under 'generate' are a normalized signature of the request built as: fragments joined by '|', then '|', then context. Format: '<frag1>|<frag2>|...||<context>' (note the double '|' separating fragments from context; context is empty -> trailing empty). Keys under 'speak' are normalized text. Phase 8 fills real candidates / subgraphs / audio; values here are empty-but-correctly-shaped placeholders.",
+  "generate": {
+    "cold|window||": {
+      "candidates": [],
+      "retrieval": {
+        "anchor_ids": [],
+        "subgraph_node_ids": [],
+        "subgraph_edge_ids": [],
+        "confidence": 0.0
+      },
+      "trace": {}
+    },
+    "tired|maybe||Mom, do you want to come for dinner Sunday?": {
+      "candidates": [],
+      "retrieval": {
+        "anchor_ids": [],
+        "subgraph_node_ids": [],
+        "subgraph_edge_ids": [],
+        "confidence": 0.0
+      },
+      "trace": {}
+    },
+    "tired|maybe||Grandma, will you play with me?": {
+      "candidates": [],
+      "retrieval": {
+        "anchor_ids": [],
+        "subgraph_node_ids": [],
+        "subgraph_edge_ids": [],
+        "confidence": 0.0
+      },
+      "trace": {}
+    }
+  },
+  "speak": {}
+}
