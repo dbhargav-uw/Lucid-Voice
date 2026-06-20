@@ -92,6 +92,78 @@ def _cos(a: np.ndarray, b: np.ndarray) -> float:
     return float(np.dot(a, b) / denom)
 
 
+def _sim_matrix(ids: list[str], embs: dict[str, np.ndarray]) -> np.ndarray:
+    """Pairwise cosine-similarity matrix over the given node ids, clipped to [0,1]."""
+    M = np.stack([embs[i] for i in ids]).astype(np.float32)
+    norms = np.linalg.norm(M, axis=1, keepdims=True)
+    norms[norms == 0] = 1.0
+    Mn = M / norms
+    W = Mn @ Mn.T
+    np.clip(W, 0.0, 1.0, out=W)
+    return W
+
+
+def greedy_submodular(
+    pool_ids: list[str], r_map: dict[str, float], embs: dict[str, np.ndarray],
+    lam: float, budget: int, seed_ids: list[str] | None = None,
+) -> list[str]:
+    """Lin-Bilmes facility-location selection by greedy maximization.
+
+    Maximizes the monotone submodular objective
+        f(S) = lam * sum_{j in S} r_j  +  sum_{i in V} max_{j in S} w(i,j)
+    over a cardinality budget, where r_j is the existing per-node relevance and
+    w(i,j) is node-embedding cosine. Greedy gives the (1 - 1/e) guarantee and is
+    O(B*|V|^2) — sub-millisecond here. No ILP/LP solver, no external calls.
+
+    ``seed_ids`` (the query's anchors/partner) are pre-included so the facts
+    always cover the query's entry points; greedy then fills the rest of the
+    budget by marginal gain.
+    """
+    n = len(pool_ids)
+    if n == 0:
+        return []
+    idx = {nid: k for k, nid in enumerate(pool_ids)}
+    W = _sim_matrix(pool_ids, embs)            # |V| x |V| coverage similarities
+    r = np.array([float(r_map.get(i, 0.0)) for i in pool_ids], dtype=np.float32)
+    cover = np.zeros(n, dtype=np.float32)       # current max_{j in S} w(i, j) per i
+    sel = np.zeros(n, dtype=bool)
+    chosen: list[str] = []
+    budget = min(int(budget), n)
+
+    # Mandatory seeds first (anchors/partner), de-duped and in order.
+    for s in (seed_ids or []):
+        if len(chosen) >= budget:
+            break
+        k = idx.get(s)
+        if k is None or sel[k]:
+            continue
+        sel[k] = True
+        chosen.append(s)
+        cover = np.maximum(cover, W[:, k])
+
+    while len(chosen) < budget:
+        # marginal gain of adding x: lam*r_x + sum_i max(0, w(i,x) - cover_i)
+        coverage_gain = np.maximum(0.0, W - cover[:, None]).sum(axis=0)
+        gains = lam * r + coverage_gain
+        gains[sel] = -np.inf
+        x = int(np.argmax(gains))
+        if not np.isfinite(gains[x]) or gains[x] <= 0.0:
+            break
+        sel[x] = True
+        chosen.append(pool_ids[x])
+        cover = np.maximum(cover, W[:, x])
+    return chosen
+
+
+def _intra_set_similarity(ids: list[str], embs: dict[str, np.ndarray]) -> float:
+    """Mean pairwise cosine within a set (redundancy; lower = more diverse)."""
+    if len(ids) < 2:
+        return 0.0
+    W = _sim_matrix(ids, embs)
+    iu = np.triu_indices(len(ids), k=1)
+    return float(round(W[iu].mean(), 4))
+
+
 class RetrievalService:
     """Assembles grounded context for generation from the graph + vectors."""
 
@@ -405,23 +477,67 @@ class RetrievalService:
                 "semantic": round(sem, 4), "hop": hop,
             })
         ranked.sort(key=lambda r: r["score"], reverse=True)
-        topk = ranked[: int(settings.retrieval_top_k)]
-        topk_ids = [r["id"] for r in topk]
 
-        # subgraph = union of expansion + vector nodes; edges among that set
-        subgraph_node_ids = candidate_ids
+        # --- 5) context selection under a fact budget ---
+        # Candidate pool V = the retrieved subgraph nodes that have scores.
+        # Replace plain top-k with greedy submodular (facility-location) maximization
+        # so the selected facts are relevant AND low-redundancy. Both selections are
+        # computed for the trace's side-by-side A/B; selection_mode picks which is used.
+        import time as _t
+        budget = int(getattr(settings, "context_budget", 8))
+        lam = float(getattr(settings, "context_lambda", 2.0))
+        mode = getattr(settings, "selection_mode", "submodular")
+
+        pool_ids = [r["id"] for r in ranked]               # V
+        r_map = {r["id"]: r["score"] for r in ranked}
+
+        topk_ids = [r["id"] for r in ranked[:budget]]      # baseline top-k by score
+        # The query's entry points (anchors + partner) are mandatory in S so the
+        # facts always ground the query; submodular fills the remaining budget.
+        seed_ids = [a for a in anchors if a in r_map]
+        if partner_id and partner_id in r_map and partner_id not in seed_ids:
+            seed_ids.append(partner_id)
+        _t0 = _t.time()
+        submod_ids = greedy_submodular(pool_ids, r_map, embs, lam, budget, seed_ids=seed_ids)
+        select_ms = round((_t.time() - _t0) * 1000, 3)
+
+        selected_ids = submod_ids if mode == "submodular" else topk_ids
+
+        def _kinds(ids: list[str]) -> list[str]:
+            return sorted({pnodes[i]["kind"] for i in ids if i in pnodes})
+
+        selection_debug = {
+            "mode": mode, "budget": budget, "lambda": lam,
+            "pool_size": len(pool_ids), "select_ms": select_ms, "solver": "greedy-submodular",
+            "submodular": {
+                "ids": submod_ids, "kinds": _kinds(submod_ids),
+                "intra_sim": _intra_set_similarity(submod_ids, embs),
+                "relevance_sum": round(sum(r_map[i] for i in submod_ids), 4),
+            },
+            "topk": {
+                "ids": topk_ids, "kinds": _kinds(topk_ids),
+                "intra_sim": _intra_set_similarity(topk_ids, embs),
+                "relevance_sum": round(sum(r_map[i] for i in topk_ids), 4),
+            },
+        }
+
+        # The selected set S IS the subgraph the GraphView highlights.
+        subgraph_node_ids = selected_ids
         subgraph_edges = self.graph._fetch_edges_among(subgraph_node_ids)
         subgraph_edge_ids = [e["id"] for e in subgraph_edges]
 
-        # 5) confidence gate
+        # 6) confidence gate (over the selected set)
+        sel_set = set(selected_ids)
         any_anchor = 1.0 if anchors else 0.0
-        max_sem_topk = max((r["semantic"] for r in topk), default=0.0)
-        confidence = round(0.5 * any_anchor + 0.5 * max_sem_topk, 4)
+        max_sem_sel = max((r["semantic"] for r in ranked if r["id"] in sel_set), default=0.0)
+        confidence = round(0.5 * any_anchor + 0.5 * max_sem_sel, 4)
         abstain = confidence < float(settings.confidence_threshold)
 
-        # 6) facts block (partner leads); partner is always a valid grounding id
-        context_block = self._assemble_facts(topk_ids, pnodes, addr_term, partner_id)
-        grounded_ids = topk_ids + ([partner_id] if partner_id and partner_id not in topk_ids else [])
+        # 7) facts block (partner leads); partner is always a valid grounding id
+        context_block = self._assemble_facts(selected_ids, pnodes, addr_term, partner_id)
+        grounded_ids = selected_ids + (
+            [partner_id] if partner_id and partner_id not in selected_ids else []
+        )
 
         return {
             "context_block": context_block,
@@ -437,5 +553,7 @@ class RetrievalService:
                 "I don't have enough to go on yet — add one more word." if abstain else None
             ),
             "grounded_ids": grounded_ids,
-            "topk": topk,
+            "selection": selection_debug,
+            "candidate_pool_ids": pool_ids,
+            "topk": ranked[:budget],
         }

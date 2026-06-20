@@ -65,6 +65,11 @@ class Settings(BaseSettings):
     retrieval_top_k: int = 8
     confidence_threshold: float = 0.35
 
+    # --- Context selection (submodular facility-location vs plain top-k) ---
+    selection_mode: str = "submodular"  # "submodular" | "topk"
+    context_budget: int = 8             # max facts (cardinality budget B)
+    context_lambda: float = 2.0         # relevance weight in f(S)
+
     # --- Ranking weights ---
     rank_alpha: float = 0.4  # graph_proximity
     rank_beta: float = 0.3  # edge_weight

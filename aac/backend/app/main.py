@@ -268,6 +268,8 @@ def generate(req: GenerateRequest) -> GenerateResponse:
         ],
         "style": style_summary,        # current learned profile (free-form trace)
         "style_fit": style_fit_info,   # per-candidate style-fit, in ranked order
+        "selection": r.get("selection"),          # submodular vs top-k A/B + metrics
+        "candidate_pool_ids": r.get("candidate_pool_ids", []),
         "topk": r.get("topk", []),
     }
     latest_trace = trace
