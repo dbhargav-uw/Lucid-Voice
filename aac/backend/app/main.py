@@ -106,6 +106,10 @@ def _get(name: str):
             from app.services.cache import CacheService
 
             inst = CacheService()
+        elif name == "tts":
+            from app.providers import get_tts_provider
+
+            inst = get_tts_provider()
     except Exception as exc:  # pragma: no cover - defensive guard
         logger.warning("Could not initialize %r: %s", name, exc)
         inst = None
@@ -229,11 +233,56 @@ def generate(req: GenerateRequest) -> GenerateResponse:
     )
 
 
+def _synthesize_with_fallback(person_id: str, text: str) -> str:
+    """Synthesize via the configured provider, with fallbacks so we never raise.
+
+    Order: configured provider (XTTS) -> ElevenLabs if a key is present and not
+    already the primary -> "" (cache-only). Returns base64 wav, or "" on total
+    failure (the caller then serves cache-only / empty so /speak never throws).
+    """
+    from app.providers.tts import voice_ref_path, ElevenLabsProvider
+
+    ref = voice_ref_path(person_id)
+    provider = _get("tts")
+    if provider is not None:
+        try:
+            return provider.synthesize(text, ref)
+        except Exception as exc:
+            logger.error("primary TTS (%s) failed: %s", settings.tts_provider, exc)
+    if settings.elevenlabs_api_key and settings.tts_provider != "elevenlabs":
+        try:
+            logger.warning("falling back to ElevenLabs for synthesis")
+            return ElevenLabsProvider().synthesize(text, ref)
+        except Exception as exc:
+            logger.error("ElevenLabs fallback failed: %s", exc)
+    logger.warning("no TTS available; serving cache-only for %r", person_id)
+    return ""
+
+
 @app.post("/speak", response_model=SpeakResponse)
 def speak(req: SpeakRequest) -> SpeakResponse:
-    """Synthesize speech for `text` in the person's cloned voice."""
-    # TODO Phase 4: real XTTS synthesis + cache lookup.
-    return SpeakResponse(audio_base64="", cached=False)
+    """Speak `text` in the person's cloned voice (cache-first; never hard-fails).
+
+    Cache-first also makes DEMO_MODE instant: pre-rendered demo lines (see
+    data/prerender_demo.py) live in the same cache, so they return immediately.
+    """
+    cache = get_cache_service()
+    if cache is not None:
+        try:
+            hit = cache.get(req.person_id, req.text)
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning("cache get failed: %s", exc)
+            hit = None
+        if hit is not None:
+            return SpeakResponse(audio_base64=hit, cached=True)
+
+    audio_b64 = _synthesize_with_fallback(req.person_id, req.text)
+    if audio_b64 and cache is not None:
+        try:
+            cache.put(req.person_id, req.text, audio_b64)
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning("cache put failed: %s", exc)
+    return SpeakResponse(audio_base64=audio_b64 or "", cached=False)
 
 
 @app.post("/confirm", response_model=ConfirmResponse)
@@ -259,9 +308,15 @@ def stt(req: STTRequest) -> STTResponse:
 
 @app.post("/enroll", response_model=EnrollResponse)
 def enroll(req: EnrollRequest) -> EnrollResponse:
-    """Enroll a voice sample for later cloning."""
-    # TODO Phase 4: real voice enrollment / reference storage.
-    return EnrollResponse(ok=True, voice_ref="")
+    """Store a person's reference wav (base64) for later voice cloning."""
+    try:
+        from app.providers.tts import save_reference
+
+        path = save_reference(req.person_id, req.audio_base64)
+        return EnrollResponse(ok=True, voice_ref=path)
+    except Exception as exc:
+        logger.error("enroll(%r) failed: %s", req.person_id, exc)
+        return EnrollResponse(ok=False, voice_ref="")
 
 
 @app.get("/graph/{person_id}", response_model=GraphResponse)

@@ -39,6 +39,13 @@ if ! command -v npm >/dev/null 2>&1; then
   exit 1
 fi
 
+# FFmpeg is required by Coqui XTTS-v2 (torchcodec) for local voice synthesis.
+# Not fatal: /speak still serves cached audio and falls back gracefully without it.
+if ! command -v ffmpeg >/dev/null 2>&1; then
+  echo "WARNING: ffmpeg not found — local XTTS voice synthesis will be unavailable" >&2
+  echo "         (cached + ElevenLabs paths still work). Install: brew install ffmpeg" >&2
+fi
+
 # --- Backend: virtualenv -----------------------------------------------------
 if [ ! -d "$VENV_DIR" ]; then
   echo "==> Creating Python virtualenv at backend/.venv"
