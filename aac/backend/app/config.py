@@ -35,8 +35,16 @@ class Settings(BaseSettings):
 
     # --- Local models ---
     embedding_model: str = "BAAI/bge-small-en-v1.5"
-    whisper_model: str = "base"
+    whisper_model: str = "small.en"
     xtts_model: str = "tts_models/multilingual/multi-dataset/xtts_v2"
+
+    # --- STT knobs ---
+    whisper_device: str = "cpu"
+    whisper_compute_type: str = "int8"
+    whisper_beam_size: int = 5
+    whisper_language: str = "en"
+    deepgram_model: str = "nova-2"
+    stt_timeout: float = 60.0
 
     # --- TTS knobs ---
     xtts_language: str = "en"

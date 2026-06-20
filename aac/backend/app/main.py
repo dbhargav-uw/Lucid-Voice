@@ -110,6 +110,10 @@ def _get(name: str):
             from app.providers import get_tts_provider
 
             inst = get_tts_provider()
+        elif name == "stt":
+            from app.providers import get_stt_provider
+
+            inst = get_stt_provider()
     except Exception as exc:  # pragma: no cover - defensive guard
         logger.warning("Could not initialize %r: %s", name, exc)
         inst = None
@@ -338,9 +342,15 @@ def consolidate(req: ConsolidateRequest) -> ConsolidateResponse:
 
 @app.post("/stt", response_model=STTResponse)
 def stt(req: STTRequest) -> STTResponse:
-    """Transcribe base64-encoded audio to text."""
-    # TODO Phase 7: real faster-whisper transcription.
-    return STTResponse(text="")
+    """Transcribe base64-encoded audio to text (never throws -> "" on failure)."""
+    provider = _get("stt")
+    if provider is None:
+        return STTResponse(text="")
+    try:
+        return STTResponse(text=provider.transcribe(req.audio_base64))
+    except Exception as exc:  # pragma: no cover - provider already guards
+        logger.error("stt failed: %s", exc)
+        return STTResponse(text="")
 
 
 @app.post("/enroll", response_model=EnrollResponse)
