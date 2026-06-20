@@ -1,0 +1,21 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# Node / frontend
+node_modules/
+dist/
+.vite/
+
+# Environment
+.env
+
+# Local data (graph, caches, voices) — generated at runtime, never committed
+**/data/kuzu_db/
+**/data/cache/
+**/data/voices/
+*.wav
+
+# macOS
+.DS_Store

@@ -1,0 +1,23 @@
+# Lucid Voice — backend dependencies
+#
+# Web / core (lightweight; safe to import at module top-level):
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+pydantic==2.10.4
+pydantic-settings==2.7.1
+python-dotenv==1.0.1
+httpx==0.28.1
+numpy==2.2.1
+
+# ---------------------------------------------------------------------------
+# Heavy / optional local-ML dependencies.
+# These pull in large native wheels and model frameworks (torch, etc.) and can
+# take significant time/disk to install. They are LAZY-IMPORTED inside the
+# functions that need them, so the app imports and runs even when these are
+# absent (e.g. for `python -m py_compile` or DEMO_MODE).
+# ---------------------------------------------------------------------------
+kuzu==0.7.1                     # embedded graph database
+sentence-transformers==3.3.1    # local embeddings
+faster-whisper==1.1.1           # local STT
+TTS==0.22.0                     # Coqui TTS / XTTS-v2 voice clone
+anthropic==0.42.0               # optional cloud LLM provider (opt-in via env)
