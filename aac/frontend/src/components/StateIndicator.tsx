@@ -1,10 +1,10 @@
-// StateIndicator — visualizes the SpeakerView state machine so the speaker
-// and partner always know what the app is doing. Calm, glanceable.
-// TODO Phase 3: animate transitions in step with real state changes.
+// StateIndicator — a quiet status pill. The dot changes color per state and the
+// label crossfades on change; NO infinite pulse (motion conveys the state
+// transition, not a decorative loop). aria-live announces state to both people.
 
-import { motion } from "framer-motion";
+import { AnimatePresence, motion } from "framer-motion";
+import { DUR, EASE_OUT } from "../lib/motion";
 
-// Mirror of the SpeakerView state union (kept in sync intentionally).
 export type SpeakerState =
   | "idle"
   | "listening"
@@ -16,52 +16,41 @@ export interface StateIndicatorProps {
   state: SpeakerState;
 }
 
-const STATE_META: Record<
-  SpeakerState,
-  { label: string; color: string }
-> = {
-  idle: { label: "Ready", color: "#9aa0a6" },
-  listening: { label: "Listening", color: "#2b6cff" },
-  thinking: { label: "Thinking", color: "#a06bff" },
-  candidates: { label: "Choose a reply", color: "#1f9d55" },
-  speaking: { label: "Speaking", color: "#ff8a3d" },
+const STATE_META: Record<SpeakerState, { label: string; dot: string }> = {
+  idle: { label: "Ready", dot: "bg-text-faint" },
+  listening: { label: "Listening", dot: "bg-voice" },
+  thinking: { label: "Composing", dot: "bg-mind" },
+  candidates: { label: "Choose a reply", dot: "bg-register-neutral" },
+  speaking: { label: "Speaking", dot: "bg-voice" },
 };
 
 export default function StateIndicator({ state }: StateIndicatorProps) {
   const meta = STATE_META[state];
+
   return (
     <div
       role="status"
       aria-live="polite"
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        gap: "0.6rem",
-        padding: "0.5rem 1rem",
-        borderRadius: "999px",
-        background: "var(--strip-bg, #ffffff)",
-        border: "1px solid rgba(0,0,0,0.08)",
-        fontSize: "0.95rem",
-        fontWeight: 500,
-      }}
+      className="inline-flex items-center gap-2.5 rounded-full border border-ink-line bg-ink-raised/70 py-1.5 pl-3 pr-4"
     >
-      <motion.span
-        key={state}
+      <span
         aria-hidden
-        animate={
-          state === "thinking" || state === "listening"
-            ? { opacity: [0.4, 1, 0.4] }
-            : { opacity: 1 }
-        }
-        transition={{ repeat: Infinity, duration: 1.2 }}
-        style={{
-          width: 12,
-          height: 12,
-          borderRadius: "50%",
-          background: meta.color,
-        }}
+        className={`h-2 w-2 rounded-full transition-colors duration-300 ${meta.dot}`}
       />
-      {meta.label}
+      <span className="relative inline-grid">
+        <AnimatePresence mode="wait" initial={false}>
+          <motion.span
+            key={state}
+            initial={{ opacity: 0, y: 4 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -4 }}
+            transition={{ duration: DUR.fast, ease: EASE_OUT }}
+            className="font-mono text-[0.74rem] uppercase tracking-[0.14em] text-text-muted"
+          >
+            {meta.label}
+          </motion.span>
+        </AnimatePresence>
+      </span>
     </div>
   );
 }

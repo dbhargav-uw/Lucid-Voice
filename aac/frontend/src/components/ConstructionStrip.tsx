@@ -1,61 +1,50 @@
-// ConstructionStrip — shows the fragments the speaker has chosen so far,
-// with a clear button. Calm, large targets.
-// TODO Phase 3: allow re-ordering / removing individual fragments.
+// ConstructionStrip — the fragments tapped so far. Each chip carries its own ✕
+// to remove a single fragment; Clear wipes all. Chips fly in as a state change
+// (a word was added), with a subtler exit than enter.
 
 import { AnimatePresence, motion } from "framer-motion";
+import { X } from "@phosphor-icons/react";
+import { DUR, EASE_OUT } from "../lib/motion";
 
 export interface ConstructionStripProps {
   fragments: string[];
+  onRemove: (index: number) => void;
   onClear: () => void;
 }
 
 export default function ConstructionStrip({
   fragments,
+  onRemove,
   onClear,
 }: ConstructionStripProps) {
+  const empty = fragments.length === 0;
+
   return (
-    <div
-      style={{
-        display: "flex",
-        alignItems: "center",
-        gap: "0.75rem",
-        minHeight: "72px",
-        padding: "0.75rem 1rem",
-        borderRadius: "16px",
-        background: "var(--strip-bg, #ffffff)",
-        border: "1px solid rgba(0,0,0,0.08)",
-      }}
-    >
-      <div
-        style={{
-          flex: 1,
-          display: "flex",
-          flexWrap: "wrap",
-          gap: "0.5rem",
-          alignItems: "center",
-        }}
-      >
-        {fragments.length === 0 ? (
-          <span style={{ opacity: 0.45, fontSize: "1.05rem" }}>
-            Tap words to build a message…
-          </span>
+    <div className="flex min-h-[72px] items-center gap-3 rounded-lg border border-ink-line bg-ink-raised px-4 py-3 shadow-card">
+      <div className="flex flex-1 flex-wrap items-center gap-2">
+        {empty ? (
+          <span className="text-aac-base text-text-faint">Tap words to begin.</span>
         ) : (
           <AnimatePresence initial={false}>
             {fragments.map((fragment, i) => (
               <motion.span
                 key={`${fragment}-${i}`}
-                initial={{ opacity: 0, y: 6 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0 }}
-                style={{
-                  padding: "0.4rem 0.9rem",
-                  borderRadius: "999px",
-                  background: "var(--chip-bg, #eef0f4)",
-                  fontSize: "1.05rem",
-                  fontWeight: 500,
-                }}
+                layout
+                initial={{ opacity: 0, y: 8, scale: 0.9 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.92 }}
+                transition={{ duration: DUR.base, ease: EASE_OUT }}
+                className="inline-flex items-center gap-1 rounded-full border border-voice/30 bg-voice-soft py-1.5 pl-4 pr-2 text-aac-base font-medium text-text"
               >
                 {fragment}
+                <button
+                  type="button"
+                  onClick={() => onRemove(i)}
+                  aria-label={`Remove ${fragment}`}
+                  className="grid h-7 w-7 place-items-center rounded-full text-text-muted transition-colors duration-150 hover:bg-ink/50 hover:text-text"
+                >
+                  <X size={14} weight="bold" aria-hidden />
+                </button>
               </motion.span>
             ))}
           </AnimatePresence>
@@ -65,19 +54,10 @@ export default function ConstructionStrip({
       <button
         type="button"
         onClick={onClear}
-        disabled={fragments.length === 0}
-        style={{
-          minHeight: "48px",
-          minWidth: "72px",
-          borderRadius: "12px",
-          border: "none",
-          background: "transparent",
-          color: "inherit",
-          opacity: fragments.length === 0 ? 0.3 : 0.7,
-          fontSize: "1rem",
-          cursor: fragments.length === 0 ? "default" : "pointer",
-        }}
+        disabled={empty}
+        className="inline-flex min-h-touch items-center gap-1.5 rounded-md px-3 font-mono text-[0.74rem] uppercase tracking-[0.12em] text-text-muted transition-colors duration-150 enabled:hover:text-text disabled:cursor-default disabled:opacity-30"
       >
+        <X size={13} weight="bold" aria-hidden />
         Clear
       </button>
     </div>

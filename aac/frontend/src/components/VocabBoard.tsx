@@ -1,8 +1,11 @@
-// VocabBoard — categorized vocabulary tile board.
-// Calm layout, large touch targets. Phase 1 renders placeholder categories.
-// TODO Phase 2: source categories/tiles from seeded vocabulary + graph.
+// VocabBoard — categorized vocabulary tiles in the bottom well.
+//
+// Tiles are ink-raised, lift + gain a voice-tinted ring on hover, and tap to
+// 0.96. Includes the demo people (Sofia, Mateo, Marco) and the demo words
+// (cold, window, tired, maybe) so all three demo rounds are tappable.
 
 import { motion } from "framer-motion";
+import { EASE_OUT } from "../lib/motion";
 
 export interface VocabTile {
   id: string;
@@ -20,16 +23,15 @@ export interface VocabBoardProps {
   categories?: VocabCategory[];
 }
 
-// Placeholder vocabulary until Phase 2 wires real data.
-const PLACEHOLDER_CATEGORIES: VocabCategory[] = [
+// Demo persona (Elena) vocabulary — covers all three demo rounds.
+const DEMO_CATEGORIES: VocabCategory[] = [
   {
     id: "people",
     label: "People",
     tiles: [
-      { id: "p-mum", label: "Mum" },
-      { id: "p-dad", label: "Dad" },
-      { id: "p-nurse", label: "Nurse" },
-      { id: "p-friend", label: "Friend" },
+      { id: "p-sofia", label: "Sofia" },
+      { id: "p-mateo", label: "Mateo" },
+      { id: "p-marco", label: "Marco" },
     ],
   },
   {
@@ -37,8 +39,8 @@ const PLACEHOLDER_CATEGORIES: VocabCategory[] = [
     label: "Feelings",
     tiles: [
       { id: "f-tired", label: "tired" },
+      { id: "f-cold", label: "cold" },
       { id: "f-happy", label: "happy" },
-      { id: "f-pain", label: "in pain" },
       { id: "f-okay", label: "okay" },
     ],
   },
@@ -46,19 +48,19 @@ const PLACEHOLDER_CATEGORIES: VocabCategory[] = [
     id: "needs",
     label: "Needs",
     tiles: [
+      { id: "n-window", label: "window" },
       { id: "n-water", label: "water" },
       { id: "n-rest", label: "rest" },
       { id: "n-help", label: "help" },
-      { id: "n-bathroom", label: "bathroom" },
     ],
   },
   {
     id: "social",
     label: "Social",
     tiles: [
+      { id: "s-maybe", label: "maybe" },
       { id: "s-yes", label: "yes" },
       { id: "s-no", label: "no" },
-      { id: "s-thanks", label: "thank you" },
       { id: "s-later", label: "later" },
     ],
   },
@@ -66,52 +68,23 @@ const PLACEHOLDER_CATEGORIES: VocabCategory[] = [
 
 export default function VocabBoard({
   onTileTap,
-  categories = PLACEHOLDER_CATEGORIES,
+  categories = DEMO_CATEGORIES,
 }: VocabBoardProps) {
   return (
-    <div
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        gap: "1.5rem",
-      }}
-    >
+    <div className="flex flex-col gap-6">
       {categories.map((category) => (
         <section key={category.id} aria-label={category.label}>
-          <h3
-            style={{
-              margin: "0 0 0.5rem",
-              fontSize: "0.85rem",
-              letterSpacing: "0.05em",
-              textTransform: "uppercase",
-              opacity: 0.6,
-            }}
-          >
-            {category.label}
-          </h3>
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(auto-fill, minmax(120px, 1fr))",
-              gap: "0.75rem",
-            }}
-          >
+          <h3 className="eyebrow mb-2">{category.label}</h3>
+          <div className="grid grid-cols-[repeat(auto-fill,minmax(132px,1fr))] gap-3">
             {category.tiles.map((tile) => (
               <motion.button
                 key={tile.id}
                 type="button"
-                whileTap={{ scale: 0.96 }}
+                whileHover={{ y: -3 }}
+                whileTap={{ scale: 0.97, y: 0 }}
+                transition={{ duration: 0.18, ease: EASE_OUT }}
                 onClick={() => onTileTap(tile)}
-                style={{
-                  minHeight: "88px",
-                  borderRadius: "16px",
-                  border: "1px solid rgba(0,0,0,0.08)",
-                  background: "var(--tile-bg, #f5f5f7)",
-                  color: "inherit",
-                  fontSize: "1.1rem",
-                  fontWeight: 500,
-                  cursor: "pointer",
-                }}
+                className="min-h-tile rounded-lg border border-ink-line bg-ink-raised font-ui text-tile font-semibold text-text shadow-card transition-[border-color,box-shadow,background-color] duration-200 hover:border-voice/45 hover:bg-ink-raised hover:shadow-lift"
               >
                 {tile.label}
               </motion.button>

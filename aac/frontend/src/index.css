@@ -4,7 +4,7 @@
 
 @layer base {
   :root {
-    color-scheme: light;
+    color-scheme: dark;
   }
 
   html,
@@ -14,19 +14,103 @@
   }
 
   body {
-    @apply bg-calm-bg text-calm-text;
+    @apply bg-ink text-text font-ui;
     margin: 0;
-    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
-      Helvetica, Arial, sans-serif;
-    font-size: 1.25rem;
+    font-size: 1.0625rem;
     line-height: 1.6;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
   }
 
-  /* Larger, calmer focus ring for accessibility / touch use. */
+  /* The human utterance: a reading serif with optical sizing. */
+  .font-utter {
+    font-family: theme("fontFamily.utter");
+    font-optical-sizing: auto;
+  }
+
+  /* Visible focus ring on every interactive element (a11y, non-negotiable). */
   :focus-visible {
-    outline: 3px solid theme("colors.calm.primary");
+    outline: 2px solid theme("colors.voice");
     outline-offset: 2px;
+    border-radius: 6px;
+  }
+}
+
+@layer components {
+  .font-mono {
+    font-family: theme("fontFamily.mono");
+  }
+  .font-ui {
+    font-family: theme("fontFamily.ui");
+  }
+
+  /* Machine label (rationed, not on every section). */
+  .eyebrow {
+    @apply font-mono uppercase text-text-muted;
+    font-size: 0.78rem;
+    letter-spacing: 0.14em;
+    font-weight: 500;
+  }
+
+  /* Stage warmth — a faint, STATIC warm wash behind the composing area that
+     conveys the speaking state by getting a touch warmer. Not a glow halo, not
+     a loop: a tinted background cue tied to .is-speaking. */
+  .stage-wash {
+    position: absolute;
+    inset: -8% -6% auto -6%;
+    height: 64%;
+    pointer-events: none;
+    z-index: 0;
+    background: radial-gradient(
+      58% 64% at 32% 24%,
+      rgba(246, 160, 99, 0.05) 0%,
+      transparent 70%
+    );
+    opacity: 0.7;
+    transition: opacity 0.5s theme("transitionTimingFunction.out-quart");
+  }
+  .is-speaking .stage-wash {
+    opacity: 1;
+    background: radial-gradient(
+      58% 64% at 32% 24%,
+      rgba(246, 160, 99, 0.11) 0%,
+      transparent 72%
+    );
+  }
+}
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+  .text-pretty {
+    text-wrap: pretty;
+  }
+
+  /* Thin, ink-toned scrollbars for the rail / wells. */
+  .scroll-ink::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  .scroll-ink::-webkit-scrollbar-thumb {
+    background: theme("colors.ink-line");
+    border-radius: 999px;
+  }
+  .scroll-ink::-webkit-scrollbar-track {
+    background: transparent;
+  }
+}
+
+/* Respect prefers-reduced-motion: neutralize transitions/animations.
+   (Framer Motion also honors it via <MotionConfig reducedMotion="user">.) */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
   }
 }

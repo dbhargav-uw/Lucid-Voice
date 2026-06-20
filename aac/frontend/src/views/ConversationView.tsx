@@ -1,6 +1,6 @@
 // ConversationView — live partner transcript + record control.
-// Phase 1: layout stub with local state only.
-// TODO Phase 7: /stt — capture mic audio, POST to stt(), append transcript.
+// Not the focus of this build; aligned to the dark ink theme so it stays
+// coherent. Functional behavior is still a Phase 7 stub.
 
 import { useState } from "react";
 import { motion } from "framer-motion";
@@ -22,46 +22,26 @@ export default function ConversationView() {
   }
 
   return (
-    <div
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        gap: "1.25rem",
-        padding: "1.5rem",
-        maxWidth: 760,
-        margin: "0 auto",
-      }}
-    >
-      <h2 style={{ margin: 0, fontSize: "1.3rem" }}>Conversation</h2>
+    <div className="mx-auto flex max-w-[760px] flex-col gap-5 p-6">
+      <h2 className="m-0 font-ui text-aac-lg font-semibold text-text">
+        Conversation
+      </h2>
 
       <div
         aria-label="Live transcript"
-        style={{
-          flex: 1,
-          minHeight: "320px",
-          padding: "1rem",
-          borderRadius: "16px",
-          background: "var(--strip-bg, #ffffff)",
-          border: "1px solid rgba(0,0,0,0.08)",
-          display: "flex",
-          flexDirection: "column",
-          gap: "0.75rem",
-        }}
+        className="scroll-ink flex min-h-[320px] flex-1 flex-col gap-3 rounded-xl border border-ink-line bg-ink-sunken p-4"
       >
         {transcript.length === 0 ? (
-          <p style={{ opacity: 0.45, margin: 0 }}>
-            {/* TODO Phase 7: partner speech transcribed here in real time. */}
+          <p className="m-0 text-text-faint">
             The partner&apos;s words will appear here once recording starts.
           </p>
         ) : (
           transcript.map((entry) => (
             <div key={entry.id}>
-              <span style={{ fontSize: "0.8rem", opacity: 0.5 }}>
+              <span className="font-mono text-eyebrow uppercase text-text-faint">
                 {entry.speaker}
               </span>
-              <p style={{ margin: "0.2rem 0 0", fontSize: "1.1rem" }}>
-                {entry.text}
-              </p>
+              <p className="m-0 mt-1 text-[1.1rem] text-text">{entry.text}</p>
             </div>
           ))
         )}
@@ -71,19 +51,12 @@ export default function ConversationView() {
         type="button"
         whileTap={{ scale: 0.96 }}
         onClick={handleToggleRecord}
-        style={{
-          alignSelf: "center",
-          minHeight: "72px",
-          minWidth: "72px",
-          padding: "0 2rem",
-          borderRadius: "20px",
-          border: "none",
-          background: recording ? "#ff4d4f" : "var(--accent, #2b6cff)",
-          color: "#fff",
-          fontSize: "1.1rem",
-          fontWeight: 600,
-          cursor: "pointer",
-        }}
+        className={[
+          "min-h-cta min-w-cta self-center rounded-lg px-8 font-ui text-[1.1rem] font-semibold transition-colors",
+          recording
+            ? "bg-voice-deep text-ink"
+            : "bg-voice text-ink hover:bg-voice-deep",
+        ].join(" ")}
       >
         {recording ? "Stop listening" : "Listen to partner"}
       </motion.button>
