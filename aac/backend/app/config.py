@@ -38,6 +38,12 @@ class Settings(BaseSettings):
     whisper_model: str = "base"
     xtts_model: str = "tts_models/multilingual/multi-dataset/xtts_v2"
 
+    # --- TTS knobs ---
+    xtts_language: str = "en"
+    tts_timeout: float = 60.0
+    elevenlabs_voice_id: str = ""
+    elevenlabs_model: str = "eleven_multilingual_v2"
+
     # --- Paths ---
     kuzu_db_path: str = "./data/kuzu_db"
     data_dir: str = "./data"

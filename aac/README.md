@@ -45,9 +45,24 @@ Related env vars: `LLM_BASE_URL` (defaults to `http://localhost:1234/v1`), `LLM_
 
 - **Python 3.11+**
 - **Node 18+**
+- **FFmpeg** — required by local voice synthesis (Coqui XTTS-v2 → torchcodec). macOS: `brew install ffmpeg`. Without it, `/speak` still serves cached audio and falls back gracefully.
 - **LM Studio** running and serving any instruct model on `http://localhost:1234` (use the LM Studio "Local Server" feature).
 
-> Note: the local-first ML dependencies (Kuzu, sentence-transformers, faster-whisper, Coqui XTTS-v2) are heavy and may take a while to install and to download model weights on first run.
+> Note: the local-first ML dependencies (Kuzu, sentence-transformers, faster-whisper, Coqui XTTS-v2) are heavy and may take a while to install and to download model weights on first run (XTTS-v2 fetches ~1.8GB).
+
+### Voice setup (XTTS-v2)
+
+The local TTS is the maintained **`coqui-tts`** (idiap fork) running XTTS-v2 for zero-shot voice cloning. To give a person a cloned voice:
+
+```bash
+cd backend
+# Enroll a reference wav (a short, clean ~10s recording works best):
+python -m data.enroll_voice elena path/to/elena.wav
+# Pre-render the demo's chosen lines into the audio cache (instant in DEMO_MODE):
+python -m data.prerender_demo elena
+```
+
+`/speak` is cache-first (sha256 of person+text), so repeated lines and the pre-rendered demo lines return instantly. On Apple Silicon XTTS runs on CPU (MPS is unreliable for XTTS); first-call synthesis of a sentence takes ~15–20s, then it's cached.
 
 ## Quickstart
 
