@@ -1,32 +1,101 @@
 """LearningService — online learning + memory consolidation (Phase 6).
 
-Closes the loop: when a user confirms an utterance, the graph is reinforced;
-periodically, frequent co-occurring patterns are mined into reusable phrases
-and consolidated into durable nodes/edges; decay keeps the world model fresh.
+Closes the loop:
+  * on_confirm — when the user confirms an utterance, extract its entities,
+    bump their salience, reinforce co_occurs edges among co-mentioned entities
+    and between the partner and the chosen phrasing, mine the phrasing into a
+    Phrase node, and record an Event node for the utterance.
+  * consolidate — a scheduled/offline pass that reads recent Events and uses an
+    LLM (Claude when ANTHROPIC_API_KEY is set, else the local LLM) to infer
+    higher-order Preferences, writing Preference nodes + prefers edges.
+  * run_decay — delegates to GraphService.decay so stale weights fade.
 
-``sentence-transformers`` and any other heavy deps are LAZY-imported inside
-methods, never at module top-level.
+Entity extraction reuses RetrievalService's LLM NER + entity-linking. Heavy
+deps are reached only through the injected providers/graph service.
 """
 
 from __future__ import annotations
 
+import hashlib
+import re
+import time
+from datetime import datetime, timezone
 from typing import Any
+
+import numpy as np
+
+from app.config import settings
+
+SALIENCE_BUMP = 0.5
+RECENT_EVENTS = 12  # how many recent events consolidate reads
+
+# Mentions only link to these "real" entity kinds (not events/phrases).
+ENTITY_KINDS = {"user", "contact", "place", "topic", "routine", "preference", "need"}
+
+# Words too generic to be entities (used when matching raw tokens to nodes).
+_STOPWORDS = {
+    "the", "and", "you", "your", "for", "can", "could", "please", "with", "have",
+    "some", "i'm", "im", "are", "its", "it", "to", "do", "want", "will", "would",
+    "me", "my", "of", "is", "so", "but", "not", "that", "this", "a", "an", "we",
+    "she", "he", "they", "them", "his", "her", "our", "us", "be", "am", "was",
+    "were", "in", "on", "at", "as", "if", "or", "let", "get", "got", "come",
+}
+
+
+def _now() -> datetime:
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+def _slug(s: str, n: int = 48) -> str:
+    s = re.sub(r"[^a-z0-9]+", "_", s.lower()).strip("_")
+    return s[:n] or "x"
+
+
+def _short_hash(s: str) -> str:
+    return hashlib.sha1(s.encode("utf-8")).hexdigest()[:10]
 
 
 class LearningService:
     """Reinforces, mines, consolidates and decays the person's world model."""
 
     def __init__(self, graph: Any, llm: Any, embedding: Any) -> None:
-        """Wire up collaborating services.
-
-        Args:
-            graph: A :class:`~app.services.graph.GraphService` instance.
-            llm: The LLM client (for phrase mining / summarization).
-            embedding: The embedding provider (for clustering / dedup).
-        """
         self.graph = graph
         self.llm = llm
         self.embedding = embedding
+        self._retr = None
+
+    # --- helpers ------------------------------------------------------------
+
+    def _retrieval(self):
+        """Reuse RetrievalService's entity extraction + linking."""
+        if self._retr is None:
+            from app.services.retrieval import RetrievalService
+
+            self._retr = RetrievalService(self.graph, self.llm, self.embedding)
+        return self._retr
+
+    def _person_state(self, person_id: str):
+        pnode_list = self.graph.person_nodes(person_id)
+        pnodes = {n["id"]: n for n in pnode_list}
+        embs = {nid: np.asarray(n["embedding"], dtype=np.float32) for nid, n in pnodes.items()}
+        user_id = next(
+            (nid for nid, n in pnodes.items() if n["kind"] == "user"),
+            f"{person_id}:{person_id}",
+        )
+        pedges = self.graph.person_edges(person_id)
+        return pnodes, embs, user_id, pedges
+
+    def _embed(self, text: str) -> list[float]:
+        try:
+            return self.embedding.embed(text)
+        except Exception:
+            return [0.0] * 384
+
+    def _salient_phrase(self, text: str) -> str:
+        """The phrasing to remember — the trimmed, whitespace-collapsed sentence."""
+        return re.sub(r"\s+", " ", (text or "").strip())
+
+    # --- /confirm -----------------------------------------------------------
 
     def on_confirm(
         self,
@@ -36,83 +105,213 @@ class LearningService:
         partner: str | None = None,
         situation: Any | None = None,
     ) -> dict[str, list[str]]:
-        """Reinforce the graph after the user confirms an utterance.
+        retr = self._retrieval()
+        pnodes, embs, user_id, pedges = self._person_state(person_id)
+        # Candidate set for entity-linking excludes events/phrases.
+        link_nodes = {nid: nd for nid, nd in pnodes.items() if nd["kind"] in ENTITY_KINDS}
+        link_embs = {nid: embs[nid] for nid in link_nodes}
 
-        Behavior: extract the entities/topics referenced by ``text`` (and the
-        conversation ``partner`` / ``situation``), bump the salience of the
-        involved nodes and reinforce the edges between them
-        (``weight += 1``, ``count += 1``, ``last_reinforced = now``), creating
-        any missing nodes/edges.
+        now = _now()
+        changed_nodes: set[str] = set()
+        changed_edges: set[str] = set()
 
-        Args:
-            person_id: Owning person's id.
-            text: The confirmed (spoken) utterance.
-            context: Free-text conversational context.
-            partner: The conversation partner, if known.
-            situation: Optional ``Situation``.
+        # --- 1) entity extraction (LLM NER, can create new nodes) ---
+        # The partner is handled separately (linked to its contact node, never
+        # created as a topic). Drop too-short / stopword mentions so we don't mint
+        # junk nodes like "i"/"you".
+        def _ok_mention(m: str) -> bool:
+            s = m.strip().lower()
+            return len(s) >= 3 and s not in _STOPWORDS
 
-        Returns:
-            ``{"changed_node_ids": [...], "changed_edge_ids": [...]}``.
+        llm_mentions = [m for m in retr._llm_mentions([text], context or "") if m and _ok_mention(m)]
+        llm_mentions = list(dict.fromkeys(llm_mentions))
 
-        # TODO Phase 6: entity-link text, upsert nodes, reinforce edges,
-        #               collect changed ids.
-        """
-        # TODO Phase 6: implement confirmation-driven reinforcement.
-        return {"changed_node_ids": [], "changed_edge_ids": []}
+        mention_embs: dict[str, np.ndarray] = {}
+        if llm_mentions:
+            try:
+                vecs = self.embedding.embed_batch(llm_mentions)
+                mention_embs = {m: np.asarray(v, dtype=np.float32) for m, v in zip(llm_mentions, vecs)}
+            except Exception:
+                mention_embs = {}
 
-    def mine_phrases(
-        self,
-        person_id: str,
-        confirmed_texts: list[str] | None = None,
-    ) -> list[dict[str, Any]]:
-        """Mine frequently reused phrasings from confirmed utterances.
+        entity_ids: list[str] = []
 
-        Behavior: cluster recent confirmed utterances by semantic similarity,
-        surface recurring phrasings as candidate Phrase nodes with usage
-        counts, so the user's habitual expressions become first-class memory.
+        def add_entity(nid: str) -> None:
+            if nid not in entity_ids:
+                entity_ids.append(nid)
+            changed_nodes.add(nid)
 
-        Args:
-            person_id: Owning person's id.
-            confirmed_texts: Optional explicit corpus; otherwise pulled from
-                the person's recent confirmed history.
+        for m in llm_mentions:
+            m_emb = mention_embs.get(m)
+            nid = retr._match_mention(m, link_nodes, link_embs, m_emb)
+            if nid is None:
+                # Create a new entity node (default kind: topic).
+                nid = f"{person_id}:c_{_slug(m)}"
+                emb_list = m_emb.tolist() if m_emb is not None else self._embed(m)
+                self.graph.upsert_node(kind="topic", id=nid, label=m, salience=1.0,
+                                       embedding=emb_list, last_seen=now)
+                nd = {"id": nid, "kind": "topic", "label": m, "salience": 1.0,
+                      "last_seen": now, "embedding": emb_list}
+                pnodes[nid] = nd
+                link_nodes[nid] = nd
+                link_embs[nid] = np.asarray(emb_list, dtype=np.float32)
+            else:
+                nd = pnodes[nid]
+                self.graph.upsert_node(kind=nd["kind"], id=nid, label=nd["label"],
+                                       salience=float(nd.get("salience") or 1.0) + SALIENCE_BUMP,
+                                       embedding=nd["embedding"], last_seen=now)
+            add_entity(nid)
 
-        Returns:
-            A list of candidate phrase dicts (text + support/count).
+        # --- also link bare content words to EXISTING entities (no creation) ---
+        # Robustness: ensures e.g. "cold"/"window" link even if the LLM misses them.
+        for w in re.findall(r"[a-zA-Z']+", (text or "").lower()):
+            if len(w) < 3 or w in _STOPWORDS:
+                continue
+            nid = retr._match_mention(w, link_nodes, link_embs, None)  # no embedding fallback
+            if nid is not None:
+                add_entity(nid)
 
-        # TODO Phase 6: embed + cluster confirmed texts, extract phrases.
-        """
-        # TODO Phase 6: implement phrase mining.
-        return []
+        # --- resolve the partner to a contact node (for partner<->phrase edge) ---
+        partner_id = None
+        if partner:
+            pl = partner.strip().lower()
+            for nid, nd in pnodes.items():
+                if nd["kind"] == "contact" and str(nd["label"]).lower() == pl:
+                    partner_id = nid
+                    break
+            if partner_id is None:
+                # e.g. partner given as how they address the user ("Mom" -> Sofia)
+                partner_by_term = {
+                    str(e["term"]).lower(): e["source"]
+                    for e in pedges
+                    if e["type"] == "addresses_as" and e.get("term")
+                    and pnodes.get(e["target"], {}).get("kind") == "user"
+                }
+                partner_id = partner_by_term.get(pl)
+        if partner_id:
+            nd = pnodes[partner_id]
+            self.graph.upsert_node(kind=nd["kind"], id=partner_id, label=nd["label"],
+                                   salience=float(nd.get("salience") or 1.0) + SALIENCE_BUMP,
+                                   embedding=nd["embedding"], last_seen=now)
+            add_entity(partner_id)
+
+        # --- 2) reinforce co_occurs among co-mentioned entities (pairwise) ---
+        for i in range(len(entity_ids)):
+            for j in range(i + 1, len(entity_ids)):
+                eid = self.graph.reinforce_edge_any_dir("co_occurs", entity_ids[i], entity_ids[j])
+                changed_edges.add(eid)
+
+        # --- 3) phrase mining: Phrase node + uses_phrase from the user ---
+        phrase_text = self._salient_phrase(text)
+        phrase_id = None
+        if phrase_text:
+            phrase_id = f"{person_id}:phrase_{_short_hash(phrase_text)}"
+            self.graph.upsert_node(kind="phrase", id=phrase_id, label=phrase_text,
+                                   salience=1.0, embedding=self._embed(phrase_text), last_seen=now)
+            changed_nodes.add(phrase_id)
+            changed_nodes.add(user_id)
+            changed_edges.add(self.graph.reinforce_edge("uses_phrase", user_id, phrase_id))
+            # between the partner/situation and the chosen phrasing
+            if partner_id:
+                changed_edges.add(
+                    self.graph.reinforce_edge_any_dir("co_occurs", partner_id, phrase_id)
+                )
+
+        # --- 4) record an Event node (consolidate reads these) ---
+        event_id = f"{person_id}:event_{int(time.time() * 1000)}"
+        self.graph.upsert_node(kind="event", id=event_id, label=phrase_text[:160] or text[:160],
+                               salience=1.0, embedding=self._embed(text), last_seen=now)
+        changed_nodes.add(event_id)
+        for ent in entity_ids:
+            changed_edges.add(self.graph.reinforce_edge("mentions", event_id, ent))
+        if phrase_id:
+            changed_edges.add(self.graph.reinforce_edge("mentions", event_id, phrase_id))
+
+        return {
+            "changed_node_ids": sorted(changed_nodes),
+            "changed_edge_ids": sorted(changed_edges),
+        }
+
+    # --- phrase mining (corpus helper) -------------------------------------
+
+    def mine_phrases(self, person_id: str, confirmed_texts: list[str] | None = None) -> list[dict[str, Any]]:
+        """Surface the person's existing Phrase nodes with their usage counts."""
+        edges = self.graph.person_edges(person_id)
+        counts = {e["target"]: e.get("count", 0) for e in edges if e["type"] == "uses_phrase"}
+        phrases = [
+            {"id": n["id"], "text": n["label"], "count": counts.get(n["id"], 0)}
+            for n in self.graph.person_nodes(person_id)
+            if n["kind"] == "phrase"
+        ]
+        phrases.sort(key=lambda p: p["count"], reverse=True)
+        return phrases
+
+    # --- /consolidate -------------------------------------------------------
+
+    def _consolidation_llm(self):
+        """Claude when a key is set, otherwise the injected local LLM."""
+        if settings.anthropic_api_key:
+            try:
+                from app.providers.llm import ClaudeProvider
+
+                return ClaudeProvider()
+            except Exception:
+                pass
+        return self.llm
+
+    def _infer_preferences(self, llm, person_id: str, utterances: list[str]) -> list[str]:
+        from app.services.retrieval import _parse_str_list
+
+        system = (
+            "You infer a person's stable, higher-order preferences from things they "
+            "recently chose to say. Return ONLY a JSON array of short preference "
+            'statements (e.g. ["likes to keep replies short and warm with family"]). '
+            "Only include patterns with clear support. Return 1-3 items."
+        )
+        bullets = "\n".join(f"- {u}" for u in utterances)
+        user = f"Recent utterances:\n{bullets}\n\nReturn a JSON array of up to 3 inferred preferences."
+        try:
+            raw = llm.generate(user, system=system)
+        except Exception:
+            return []
+        return _parse_str_list(raw)[:3]
 
     def consolidate(self, person_id: str) -> dict[str, list[str]]:
-        """Consolidate mined patterns into durable graph structure.
+        pnodes, embs, user_id, _pedges = self._person_state(person_id)
 
-        Behavior: promote mined phrases and strong transient co-occurrences
-        into persistent Phrase nodes and relationships, dedup against existing
-        memory, and prune the noise — the "sleep" pass that turns short-term
-        reinforcement into long-term knowledge.
+        events = [n for n in pnodes.values() if n["kind"] == "event"]
+        events.sort(key=lambda n: n.get("last_seen") or datetime.min, reverse=True)
+        recent = events[:RECENT_EVENTS]
+        # Fall back to phrases if no events have been recorded yet.
+        if not recent:
+            recent = [n for n in pnodes.values() if n["kind"] == "phrase"][:RECENT_EVENTS]
+        utterances = [str(n["label"]) for n in recent if n.get("label")]
+        if not utterances:
+            return {"new_node_ids": [], "new_edge_ids": []}
 
-        Args:
-            person_id: Owning person's id.
+        llm = self._consolidation_llm()
+        prefs = self._infer_preferences(llm, person_id, utterances)
 
-        Returns:
-            ``{"new_node_ids": [...], "new_edge_ids": [...]}``.
+        existing = {str(n["label"]).lower() for n in pnodes.values() if n["kind"] == "preference"}
+        now = _now()
+        new_nodes: list[str] = []
+        new_edges: list[str] = []
+        for p in prefs:
+            p = p.strip()
+            if not p or p.lower() in existing:
+                continue
+            pid = f"{person_id}:pref_{_slug(p)}"
+            if pid in pnodes:
+                continue
+            self.graph.upsert_node(kind="preference", id=pid, label=p, salience=1.0,
+                                   embedding=self._embed(p), last_seen=now)
+            new_nodes.append(pid)
+            new_edges.append(self.graph.reinforce_edge("prefers", user_id, pid))
+            existing.add(p.lower())
+        return {"new_node_ids": new_nodes, "new_edge_ids": new_edges}
 
-        # TODO Phase 6: run mine_phrases, upsert durable nodes/edges, dedup.
-        """
-        # TODO Phase 6: implement consolidation.
-        return {"new_node_ids": [], "new_edge_ids": []}
+    # --- decay --------------------------------------------------------------
 
-    def run_decay(self, elapsed: float = 1.0) -> None:
-        """Apply time-based decay to the world model.
-
-        Delegates to :meth:`GraphService.decay` so salience and edge weight
-        fade for unused memories.
-
-        Args:
-            elapsed: Elapsed time units since the last decay pass.
-
-        # TODO Phase 6: call self.graph.decay(elapsed) on a schedule.
-        """
-        # TODO Phase 6: implement scheduled decay.
-        return None
+    def run_decay(self, elapsed: float = 86400.0) -> None:
+        """Apply time-based decay (default: one day's worth)."""
+        self.graph.decay(elapsed)

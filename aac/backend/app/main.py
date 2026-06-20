@@ -302,16 +302,38 @@ def speak(req: SpeakRequest) -> SpeakResponse:
 
 @app.post("/confirm", response_model=ConfirmResponse)
 def confirm(req: ConfirmRequest) -> ConfirmResponse:
-    """Confirm an utterance was spoken; reinforce the graph."""
-    # TODO Phase 6: real learning / graph reinforcement.
-    return ConfirmResponse(changed_node_ids=[], changed_edge_ids=[])
+    """Confirm an utterance was spoken; reinforce the graph (online learning)."""
+    learning = get_learning_service()
+    if learning is None:
+        return ConfirmResponse(changed_node_ids=[], changed_edge_ids=[])
+    try:
+        result = learning.on_confirm(
+            req.person_id, req.text, req.context or "", req.partner, None
+        )
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.error("confirm(%r) failed: %s", req.person_id, exc)
+        return ConfirmResponse(changed_node_ids=[], changed_edge_ids=[])
+    return ConfirmResponse(
+        changed_node_ids=result["changed_node_ids"],
+        changed_edge_ids=result["changed_edge_ids"],
+    )
 
 
 @app.post("/consolidate", response_model=ConsolidateResponse)
 def consolidate(req: ConsolidateRequest) -> ConsolidateResponse:
-    """Consolidate recent activity into the long-term graph."""
-    # TODO Phase 6: real consolidation pass.
-    return ConsolidateResponse(new_node_ids=[], new_edge_ids=[])
+    """Consolidate recent Events into durable Preferences (scheduled/offline)."""
+    learning = get_learning_service()
+    if learning is None:
+        return ConsolidateResponse(new_node_ids=[], new_edge_ids=[])
+    try:
+        result = learning.consolidate(req.person_id)
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.error("consolidate(%r) failed: %s", req.person_id, exc)
+        return ConsolidateResponse(new_node_ids=[], new_edge_ids=[])
+    return ConsolidateResponse(
+        new_node_ids=result["new_node_ids"],
+        new_edge_ids=result["new_edge_ids"],
+    )
 
 
 @app.post("/stt", response_model=STTResponse)

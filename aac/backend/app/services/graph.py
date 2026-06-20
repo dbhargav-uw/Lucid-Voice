@@ -207,6 +207,26 @@ class GraphService:
             return self._edge_id(src_id, type, dst_id)
         return self.upsert_edge(type, src_id, dst_id, weight=1.0, count=1)
 
+    def reinforce_edge_any_dir(self, type: str, a: str, b: str) -> str:
+        """Reinforce an undirected-semantics edge (e.g. co_occurs) regardless of
+        the stored direction. Reinforces an existing a->b or b->a edge if present,
+        otherwise creates a->b. Avoids creating a duplicate reverse edge when the
+        two endpoints are extracted in the opposite order from how they're stored.
+        """
+        fwd = self._q(
+            "MATCH (:Node {id:$a})-[e:Edge {type:$t}]->(:Node {id:$b}) RETURN e.weight LIMIT 1",
+            {"a": a, "t": type, "b": b},
+        )
+        if fwd:
+            return self.reinforce_edge(type, a, b)
+        rev = self._q(
+            "MATCH (:Node {id:$b})-[e:Edge {type:$t}]->(:Node {id:$a}) RETURN e.weight LIMIT 1",
+            {"a": a, "t": type, "b": b},
+        )
+        if rev:
+            return self.reinforce_edge(type, b, a)
+        return self.reinforce_edge(type, a, b)
+
     def decay(self, elapsed: float) -> None:
         """Time-based decay over the whole graph.
 
