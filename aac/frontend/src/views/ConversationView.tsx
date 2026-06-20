@@ -54,8 +54,8 @@ export default function ConversationView() {
         className={[
           "min-h-cta min-w-cta self-center rounded-lg px-8 font-ui text-[1.1rem] font-semibold transition-colors",
           recording
-            ? "bg-voice-deep text-ink"
-            : "bg-voice text-ink hover:bg-voice-deep",
+            ? "bg-voice-deep text-on-voice"
+            : "bg-voice text-on-voice hover:bg-voice-deep",
         ].join(" ")}
       >
         {recording ? "Stop listening" : "Listen to partner"}

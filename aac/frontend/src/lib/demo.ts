@@ -42,11 +42,11 @@ const DEMO: Record<string, DemoEntry> = {
         text: "Could you close the window? I'm getting cold.",
         register: "warm",
         length_label: "full",
-        rationale: "Polite request with a reason — Elena's default warmth.",
+        rationale: "A polite request with a reason, in Elena's warm default.",
         grounded_node_ids: [],
       },
       {
-        text: "Please close the window — I'm cold.",
+        text: "Please close the window. I'm cold.",
         register: "neutral",
         length_label: "medium",
         rationale: "Even and clear.",
@@ -63,7 +63,7 @@ const DEMO: Record<string, DemoEntry> = {
     reasoning: {
       heard: "",
       tapsSignal: ["cold → discomfort", "window → the cause"],
-      profile: ["Elena — warm, former teacher", "polite by default"],
+      profile: ["Elena: warm, former teacher", "polite by default"],
       confidence: 0.86,
       grounded: ["window", "comfort routine"],
     },

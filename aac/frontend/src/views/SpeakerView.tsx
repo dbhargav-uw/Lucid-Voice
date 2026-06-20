@@ -60,7 +60,7 @@ function railFromTrace(
   return {
     heard: context,
     tapsSignal: fragments.map((f) => `${f} →`),
-    profile: ["Elena — warm, former teacher"],
+    profile: ["Elena: warm, former teacher"],
     confidence,
     grounded: [],
   };
@@ -277,7 +277,7 @@ export default function SpeakerView() {
               "inline-flex min-h-cta items-center gap-2.5 rounded-md px-6 font-ui text-[1.1rem] font-semibold transition-colors duration-200",
               ctaDisabled
                 ? "cursor-default bg-ink-raised text-text-faint"
-                : "bg-voice text-ink hover:bg-voice-deep",
+                : "bg-voice text-on-voice hover:bg-voice-deep",
             ].join(" ")}
           >
             {state === "thinking" ? (

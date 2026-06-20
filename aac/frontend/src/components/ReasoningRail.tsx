@@ -118,7 +118,7 @@ export default function ReasoningRail({ data, thinking }: ReasoningRailProps) {
 
       {!data ? (
         <div className="flex flex-1 items-center justify-center px-4 text-center">
-          <p className="font-mono text-[0.88rem] leading-relaxed text-text-faint">
+          <p className="font-mono text-[0.88rem] leading-relaxed text-text-muted">
             {thinking
               ? "Reading your words and your context…"
               : "Tap a few words and I’ll show how I got to each reply."}
@@ -138,7 +138,7 @@ export default function ReasoningRail({ data, thinking }: ReasoningRailProps) {
                 &ldquo;{data.heard}&rdquo;
               </p>
             ) : (
-              <p className="m-0 text-text-faint">Nothing yet</p>
+              <p className="m-0 text-text-muted">Nothing yet</p>
             )}
           </Section>
 
@@ -166,7 +166,7 @@ export default function ReasoningRail({ data, thinking }: ReasoningRailProps) {
               ))}
             </div>
             {data.grounded.length > 0 && (
-              <p className="m-0 mt-2.5 text-[0.78rem] text-text-faint">
+              <p className="m-0 mt-2.5 text-[0.78rem] text-text-muted">
                 grounded in {data.grounded.length} memor
                 {data.grounded.length === 1 ? "y" : "ies"}
               </p>

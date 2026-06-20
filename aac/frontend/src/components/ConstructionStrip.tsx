@@ -23,7 +23,7 @@ export default function ConstructionStrip({
     <div className="flex min-h-[72px] items-center gap-3 rounded-lg border border-ink-line bg-ink-raised px-4 py-3 shadow-card">
       <div className="flex flex-1 flex-wrap items-center gap-2">
         {empty ? (
-          <span className="text-aac-base text-text-faint">Tap words to begin.</span>
+          <span className="text-aac-base text-text-muted">Tap words to begin.</span>
         ) : (
           <AnimatePresence initial={false}>
             {fragments.map((fragment, i) => (
@@ -41,7 +41,7 @@ export default function ConstructionStrip({
                   type="button"
                   onClick={() => onRemove(i)}
                   aria-label={`Remove ${fragment}`}
-                  className="grid h-7 w-7 place-items-center rounded-full text-text-muted transition-colors duration-150 hover:bg-ink/50 hover:text-text"
+                  className="grid h-7 w-7 place-items-center rounded-full text-text-muted transition-colors duration-150 hover:bg-text/10 hover:text-text"
                 >
                   <X size={14} weight="bold" aria-hidden />
                 </button>

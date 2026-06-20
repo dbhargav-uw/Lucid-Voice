@@ -73,7 +73,7 @@ export default function CandidateCard({
             {candidate.register}
           </span>
         </span>
-        <span className="rounded-full border border-ink-line bg-ink-sunken px-3 py-1 font-mono text-[0.7rem] uppercase tracking-[0.12em] text-text-faint">
+        <span className="rounded-full border border-ink-line bg-ink-sunken px-3 py-1 font-mono text-[0.7rem] uppercase tracking-[0.12em] text-text-muted">
           {candidate.length_label}
         </span>
       </div>
@@ -89,7 +89,7 @@ export default function CandidateCard({
           type="button"
           whileTap={reduce ? undefined : { scale: 0.97 }}
           onClick={() => onSay(candidate)}
-          className="inline-flex min-h-cta items-center gap-2.5 rounded-md bg-voice px-6 font-ui text-[1.05rem] font-semibold text-ink transition-colors duration-200 hover:bg-voice-deep"
+          className="inline-flex min-h-cta items-center gap-2.5 rounded-md bg-voice px-6 font-ui text-[1.05rem] font-semibold text-on-voice transition-colors duration-200 hover:bg-voice-deep"
         >
           <SpeakerHigh size={20} weight="fill" aria-hidden />
           Say this

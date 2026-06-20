@@ -38,7 +38,7 @@ export default function PlaybackButton({
         "inline-flex min-h-cta min-w-cta items-center justify-center gap-2.5 rounded-lg px-6 font-ui text-[1.1rem] font-semibold transition-colors",
         isDisabled
           ? "cursor-default bg-ink-raised text-text-faint"
-          : "bg-voice text-ink hover:bg-voice-deep",
+          : "bg-voice text-on-voice hover:bg-voice-deep",
       ].join(" ")}
     >
       {playing ? (

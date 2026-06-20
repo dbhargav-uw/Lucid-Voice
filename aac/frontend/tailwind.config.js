@@ -4,32 +4,34 @@ export default {
   theme: {
     extend: {
       colors: {
-        // ── Lucid Voice "ink" console palette (DESIGN.md) ─────────────────
-        // Deep, warm indigo-black canvas — premium, calm, never clinical.
-        ink: "#14121C",
-        "ink-raised": "#1E1B29", // cards, strip, rail surfaces
-        "ink-sunken": "#100E16", // wells (vocab board, transcript)
-        "ink-line": "#2C2838", // hairline borders / dividers
+        // ── Lucid Voice LIGHT palette ─────────────────────────────────────
+        // Bright, airy daylight console. Token NAMES kept ("ink"/"text") so all
+        // components re-theme by value; canvas is a soft cool off-white (not the
+        // AI cream, not pure white). Accents: vivid coral (human) + teal (machine).
+        ink: "#F5F7FA", // app canvas (soft cool off-white)
+        "ink-raised": "#FFFFFF", // cards, strip, rail surfaces (clean elevation)
+        "ink-sunken": "#E9EDF3", // wells (vocab board, inputs)
+        "ink-line": "#D6DEE8", // hairline borders / dividers
 
-        text: "#F4EFE9", // primary text (warm "paper")
-        "text-muted": "#A39DB0", // secondary text / labels
-        "text-faint": "#6E6880", // placeholders, disabled
+        text: "#161A21", // primary text (near-black, high contrast)
+        "text-muted": "#566273", // secondary text / labels (AA on white)
+        "text-faint": "#8089A3", // placeholders, disabled
 
-        // THE HUMAN — warm amber (their words, their voice, primary actions).
-        voice: "#F6A063",
-        "voice-deep": "#E07a40",
-        "voice-soft": "#2E2620", // warm tint on dark (selected utterance bg)
+        // THE HUMAN — vivid coral (their words, their voice, primary actions).
+        voice: "#E14826",
+        "voice-deep": "#C23A1B", // hover / pressed
+        "voice-soft": "#FCE9E3", // light coral tint (selected utterance / chips)
+        "on-voice": "#FFFFFF", // text/icons on a coral fill
 
-        // THE MACHINE — cool aqua (reasoning, confidence, machine state).
-        mind: "#63DCC9",
-        "mind-soft": "#18292B",
+        // THE MACHINE — teal (reasoning, confidence, machine state).
+        mind: "#0C8276",
+        "mind-soft": "#DBF1ED", // light teal tint (rail panel)
 
-        // Register triad — tone tags, ALWAYS paired with a text label.
-        // Violet desaturated away from the "AI purple" tell.
+        // Register triad — tone tags, ALWAYS paired with a text label, AA on light.
         register: {
-          warm: "#F6B27E",
-          neutral: "#AEA6CF",
-          direct: "#79DDCC",
+          warm: "#C2410C", // burnt coral
+          neutral: "#5B45C9", // indigo-violet
+          direct: "#0C8276", // teal
         },
 
         // Legacy calm palette retained for non-focus views (Conversation/Graph).
@@ -94,11 +96,11 @@ export default {
         reason: ["0.95rem", { lineHeight: "1.5" }],
       },
       boxShadow: {
-        // Tinted depth, not pure-black drop shadows; subtle top-edge highlight.
-        card: "inset 0 1px 0 0 rgba(255,255,255,0.04), 0 22px 46px -30px rgba(8,6,14,0.9)",
-        lift: "inset 0 1px 0 0 rgba(255,255,255,0.06), 0 18px 40px -24px rgba(8,6,14,0.85)",
-        // The speak moment's warmth comes from a tinted shadow, not a neon glow.
-        utter: "inset 0 1px 0 0 rgba(246,160,99,0.14), 0 26px 60px -30px rgba(224,122,64,0.4)",
+        // Soft, ink-tinted shadows for a light surface (no heavy black drops).
+        card: "0 1px 2px 0 rgba(22,26,33,0.04), 0 10px 24px -14px rgba(22,26,33,0.12)",
+        lift: "0 2px 6px 0 rgba(22,26,33,0.07), 0 18px 36px -18px rgba(22,26,33,0.16)",
+        // The speak moment's warmth: a coral-tinted shadow, not a neon glow.
+        utter: "0 2px 8px 0 rgba(225,72,38,0.12), 0 20px 44px -20px rgba(225,72,38,0.30)",
       },
     },
   },

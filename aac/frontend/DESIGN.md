@@ -197,3 +197,22 @@ console with ONE crafted moment; not decoration everywhere).
   candidates); a single degraded backend candidate no longer loses the divergence demo.
 
 — 🖌️ Gigi
+
+---
+
+## Elevation v3 (current) — LIGHT theme
+
+Per the CEO's call, flipped to a bright, airy **light** interface (token names kept; values flipped):
+- Canvas `ink` = soft cool off-white `#F5F7FA` (not cream, not pure white); surfaces `ink-raised` =
+  white; wells `ink-sunken` = `#E9EDF3`; lines `#D6DEE8`. Text near-black `#161A21` / muted `#566273`.
+- **Accents:** the human = **vivid coral** `voice #E14826` (white text on fills via `on-voice`); the
+  machine = **teal** `mind #0C8276`. Register tags re-tuned for AA on light (warm `#C2410C`, neutral
+  indigo `#5B45C9`, direct teal). Shadows are soft ink-tinted (no heavy black drops); the speak
+  moment keeps a coral-tinted `shadow-utter`. `stage-wash` is a faint coral wash.
+- All contrast re-checked for AA on light; dark-overlay hover assumptions fixed.
+- Anti-slop review fixes folded in: em-dashes removed from user-facing strings; faint text on
+  meaningful copy bumped to `text-muted`.
+
+Note: Tailwind config (token) changes require a dev-server restart to take effect.
+
+— 🖌️ Gigi
