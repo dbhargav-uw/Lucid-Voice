@@ -32,6 +32,7 @@ from app.models import (
     SpeakResponse,
     STTRequest,
     STTResponse,
+    StyleProfile,
     Candidate,
     RetrievalInfo,
 )
@@ -114,6 +115,10 @@ def _get(name: str):
             from app.providers import get_stt_provider
 
             inst = get_stt_provider()
+        elif name == "style":
+            from app.services.style import StyleService
+
+            inst = StyleService(_get("graph"))
     except Exception as exc:  # pragma: no cover - defensive guard
         logger.warning("Could not initialize %r: %s", name, exc)
         inst = None
@@ -213,9 +218,31 @@ def generate(req: GenerateRequest) -> GenerateResponse:
         return GenerateResponse(candidates=[], retrieval=info, trace=trace,
                                 abstain=True, abstain_reason=r.get("abstain_reason"))
 
+    # Personal style: inject the learned profile + exemplars into the prompt,
+    # then re-rank the candidates by style-fit so the preferred style ranks first.
+    style_svc = _get("style")
+    style_prompt = ""
+    if style_svc is not None:
+        try:
+            style_prompt = style_svc.style_prompt(req.person_id)
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning("style_prompt failed: %s", exc)
+
     candidates = generation.generate_candidates(
-        req.fragments, req.context or "", r["context_block"], valid_node_ids=r["grounded_ids"]
+        req.fragments, req.context or "", r["context_block"],
+        valid_node_ids=r["grounded_ids"], style_prompt=style_prompt,
     )
+
+    style_fit_info: list = []
+    style_summary = None
+    if style_svc is not None:
+        try:
+            if candidates:
+                candidates, style_fit_info = style_svc.rank_candidates(req.person_id, candidates)
+            style_summary = style_svc.get_profile(req.person_id)
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning("style ranking failed: %s", exc)
+
     trace = {
         "anchors": r["retrieval"]["anchor_ids"],
         "subgraph_node_ids": r["retrieval"]["subgraph_node_ids"],
@@ -239,6 +266,8 @@ def generate(req: GenerateRequest) -> GenerateResponse:
             }
             for c in candidates
         ],
+        "style": style_summary,        # current learned profile (free-form trace)
+        "style_fit": style_fit_info,   # per-candidate style-fit, in ranked order
         "topk": r.get("topk", []),
     }
     latest_trace = trace
@@ -316,10 +345,23 @@ def confirm(req: ConfirmRequest) -> ConfirmResponse:
         )
     except Exception as exc:  # pragma: no cover - defensive
         logger.error("confirm(%r) failed: %s", req.person_id, exc)
-        return ConfirmResponse(changed_node_ids=[], changed_edge_ids=[])
+        result = {"changed_node_ids": [], "changed_edge_ids": []}
+
+    # Implicit-feedback style update: contrast the chosen utterance against the
+    # rejected alternatives from the last /generate (carried in latest_trace).
+    style = None
+    style_svc = _get("style")
+    if style_svc is not None:
+        try:
+            cands = latest_trace.get("candidates", []) if isinstance(latest_trace, dict) else []
+            style = style_svc.observe_confirm(req.person_id, req.text, cands, req.partner)
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning("style update failed: %s", exc)
+
     return ConfirmResponse(
         changed_node_ids=result["changed_node_ids"],
         changed_edge_ids=result["changed_edge_ids"],
+        style=style,
     )
 
 
@@ -338,6 +380,19 @@ def consolidate(req: ConsolidateRequest) -> ConsolidateResponse:
         new_node_ids=result["new_node_ids"],
         new_edge_ids=result["new_edge_ids"],
     )
+
+
+@app.get("/style/{person_id}", response_model=StyleProfile)
+def style(person_id: str) -> StyleProfile:
+    """Return the person's current learned communication-style profile."""
+    svc = _get("style")
+    if svc is None:
+        return StyleProfile(person_id=person_id)
+    try:
+        return StyleProfile(**svc.get_profile(person_id))
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.error("style(%r) failed: %s", person_id, exc)
+        return StyleProfile(person_id=person_id)
 
 
 @app.post("/stt", response_model=STTResponse)

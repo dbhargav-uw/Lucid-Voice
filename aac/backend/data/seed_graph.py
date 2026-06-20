@@ -176,6 +176,14 @@ def build(graph: Any = None, embedder: Any = None, reset: bool = True) -> dict[s
             )
             total_edges += 1
 
+    # Seed each persona's learned communication-style profile (warm-start, so
+    # the demo isn't cold-start). Reset to the seed on every reseed.
+    from app.services.style import StyleService
+
+    style = StyleService()
+    for persona in PERSONAS:
+        style.seed_persona(persona["person_id"], force=True)
+
     return {"nodes": total_nodes, "edges": total_edges}
 
 

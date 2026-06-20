@@ -57,6 +57,7 @@ class Settings(BaseSettings):
     data_dir: str = "./data"
     cache_dir: str = "./data/cache"
     voices_dir: str = "./data/voices"
+    styles_dir: str = "./data/styles"
     demo_fixtures_path: str = "./data/demo_fixtures.json"
 
     # --- Retrieval ---

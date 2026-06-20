@@ -94,6 +94,24 @@ class SpeakResponse(BaseModel):
     cached: bool
 
 
+# --- Personal Communication-Style Model -------------------------------------
+
+
+class StyleProfile(BaseModel):
+    """A person's learned communication-style profile."""
+
+    person_id: str
+    length_pref: str = "medium"            # short | medium | long
+    directness_pref: str = "polite-elaborate"  # direct | polite-elaborate
+    language_mix: str = "english-only"     # english-only | spanish-with-family
+    endearment_use: str = "low"            # low | high
+    # Continuous learned centers in [0,1] (length, directness, endearment, spanish)
+    weights: dict[str, float] = Field(default_factory=dict)
+    idiolect_markers: list[str] = Field(default_factory=list)
+    exemplars: list[str] = Field(default_factory=list)
+    updates: int = 0
+
+
 # --- /confirm ---------------------------------------------------------------
 
 
@@ -107,6 +125,8 @@ class ConfirmRequest(BaseModel):
 class ConfirmResponse(BaseModel):
     changed_node_ids: list[str] = Field(default_factory=list)
     changed_edge_ids: list[str] = Field(default_factory=list)
+    # Additive: the updated learned style summary after this confirmation.
+    style: Optional[StyleProfile] = None
 
 
 # --- /consolidate -----------------------------------------------------------

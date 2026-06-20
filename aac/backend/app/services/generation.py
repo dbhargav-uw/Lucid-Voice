@@ -47,13 +47,17 @@ class GenerationService:
     def __init__(self, llm: Any) -> None:
         self.llm = llm
 
-    def _build_user_prompt(self, fragments: list[str], context: str, retrieved_facts: str) -> str:
+    def _build_user_prompt(
+        self, fragments: list[str], context: str, retrieved_facts: str, style_prompt: str = ""
+    ) -> str:
         joined = " | ".join(f for f in fragments if f) or "(none)"
+        style_block = f"{style_prompt.strip()}\n\n" if style_prompt and style_prompt.strip() else ""
         return (
             f"CONVERSATION CONTEXT (what the partner just said / situation):\n"
             f"{context.strip() or '(none)'}\n\n"
             f"RETRIEVED FACTS (ground your wording in these; cite ids in grounded_node_ids):\n"
             f"{retrieved_facts.strip() or '(none)'}\n\n"
+            f"{style_block}"
             f"INPUT (the person's fragments):\n{joined}\n\n"
             f"Return the JSON array of 3 candidates now."
         )
@@ -126,10 +130,11 @@ class GenerationService:
         context: str,
         retrieved_facts: str,
         valid_node_ids: list[str] | None = None,
+        style_prompt: str = "",
     ) -> list[dict[str, Any]]:
         """Produce up to three Candidate-shaped dicts (never raises)."""
         valid_ids = set(valid_node_ids or [])
-        user_prompt = self._build_user_prompt(fragments, context, retrieved_facts)
+        user_prompt = self._build_user_prompt(fragments, context, retrieved_facts, style_prompt)
 
         # First attempt.
         try:
