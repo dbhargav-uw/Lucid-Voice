@@ -1,8 +1,10 @@
 // useSpeak — owns playback for the Speaker view.
 //
-// Chain (never silent): call speak({ person_id, text }); if audio_base64 is
-// non-empty, decode + play it; otherwise (empty payload or any error) fall
-// back to the browser SpeechSynthesis API so the demo ALWAYS produces audio.
+// Chain (never silent): call speak({ person_id, text }); if the backend returns
+// a non-empty audio_base64 (the cloned voice) we decode + play it; otherwise we
+// speak via the browser SpeechSynthesis API using the best available on-device
+// voice. Browser TTS is the PRIMARY path today (the backend cloned-voice path
+// is wired and ready, so it takes over automatically once a voice is enrolled).
 //
 // The hook NEVER auto-speaks — it only plays when speak() is called explicitly
 // (the Speaker view calls it from the "Say this" click only).
@@ -13,6 +15,46 @@ import { speak as apiSpeak } from "../lib/api";
 export interface UseSpeak {
   speak: (text: string) => Promise<void>;
   playing: boolean;
+}
+
+// --- best available system voice -------------------------------------------
+// Prefer a warm, natural, on-device English voice (Elena = warm retired
+// teacher). macOS "Enhanced/Premium" voices and known-natural female voices
+// score highest; on-device (localService) voices are preferred so playback
+// stays airplane-safe and low-latency.
+const PREFERRED_NAMES = [
+  "ava", "allison", "samantha", "serena", "joelle", "nora", "zoe", "moira", "tessa", "karen", "fiona",
+];
+
+function scoreVoice(v: SpeechSynthesisVoice): number {
+  const lang = v.lang.toLowerCase();
+  if (!lang.startsWith("en")) return -Infinity;
+  const name = v.name.toLowerCase();
+  let s = lang === "en-us" ? 5 : 2;
+  if (v.localService) s += 4; // on-device → airplane-safe, usually higher quality on macOS
+  if (/(enhanced|premium)/.test(name)) s += 10;
+  const idx = PREFERRED_NAMES.findIndex((n) => name.includes(n));
+  if (idx >= 0) s += 8 - idx * 0.4; // earlier in the list = warmer female pick
+  if (name.includes("google")) s += 3; // Chrome's Google voices are natural (online)
+  return s;
+}
+
+let cachedVoice: SpeechSynthesisVoice | null = null;
+function pickBestVoice(): SpeechSynthesisVoice | null {
+  if (typeof window === "undefined" || !window.speechSynthesis) return null;
+  const voices = window.speechSynthesis.getVoices();
+  if (!voices.length) return cachedVoice; // not loaded yet; voiceschanged will retry
+  let best: SpeechSynthesisVoice | null = null;
+  let bestScore = -Infinity;
+  for (const v of voices) {
+    const sc = scoreVoice(v);
+    if (sc > bestScore) {
+      bestScore = sc;
+      best = v;
+    }
+  }
+  if (best) cachedVoice = best;
+  return cachedVoice;
 }
 
 // Decode a base64 string into an ArrayBuffer for the Audio element.
@@ -31,9 +73,13 @@ export function useSpeak(personId: string): UseSpeak {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const urlRef = useRef<string | null>(null);
 
-  // Clean up any object URL / utterance on unmount.
+  // Warm the voice cache (the list often loads async) + clean up on unmount.
   useEffect(() => {
+    pickBestVoice();
+    const onVoices = () => pickBestVoice();
+    window.speechSynthesis?.addEventListener?.("voiceschanged", onVoices);
     return () => {
+      window.speechSynthesis?.removeEventListener?.("voiceschanged", onVoices);
       if (urlRef.current) URL.revokeObjectURL(urlRef.current);
       try {
         window.speechSynthesis?.cancel();
@@ -51,8 +97,16 @@ export function useSpeak(personId: string): UseSpeak {
       }
       window.speechSynthesis.cancel();
       const utter = new SpeechSynthesisUtterance(text);
-      utter.rate = 0.98;
+      const voice = pickBestVoice();
+      if (voice) {
+        utter.voice = voice;
+        utter.lang = voice.lang;
+      } else {
+        utter.lang = "en-US";
+      }
+      utter.rate = 0.96; // a touch unhurried → warm, natural delivery (Elena)
       utter.pitch = 1.0;
+      utter.volume = 1.0;
       utter.onend = () => resolve();
       utter.onerror = () => resolve();
       window.speechSynthesis.speak(utter);

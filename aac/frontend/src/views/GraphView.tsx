@@ -6,7 +6,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { useReducedMotion } from "framer-motion";
-import ForceGraph, {
+import {
   KIND_COLORS,
   type FGNode,
   type FGLink,
@@ -14,6 +14,7 @@ import ForceGraph, {
   type Highlight,
   type Growth,
 } from "../components/ForceGraph";
+import HologramBrain from "../components/HologramBrain";
 import { getGraph, generate } from "../lib/api";
 import { DUR, EASE_OUT } from "../lib/motion";
 
@@ -280,10 +281,18 @@ export default function GraphView() {
 
   return (
     <div style={{ display: "flex", height: "100%", background: INK, color: TEXT }}>
-      {/* Graph canvas */}
-      <div ref={containerRef} style={{ position: "relative", flex: 1, minWidth: 0, background: INK }}>
+      {/* Graph canvas — dark viewport so the hologram brain glows (bloom). */}
+      <div
+        ref={containerRef}
+        style={{
+          position: "relative",
+          flex: 1,
+          minWidth: 0,
+          background: "radial-gradient(120% 120% at 50% 38%, #0a1724 0%, #05090e 72%)",
+        }}
+      >
         {data && dims.w > 0 && dims.h > 0 ? (
-          <ForceGraph
+          <HologramBrain
             data={data}
             width={dims.w}
             height={dims.h}
@@ -296,7 +305,7 @@ export default function GraphView() {
               display: "grid",
               placeItems: "center",
               height: "100%",
-              color: TEXT_MUTED,
+              color: "#8aa0b5",
               fontSize: 14,
             }}
           >
