@@ -167,10 +167,14 @@ def _intra_set_similarity(ids: list[str], embs: dict[str, np.ndarray]) -> float:
 class RetrievalService:
     """Assembles grounded context for generation from the graph + vectors."""
 
-    def __init__(self, graph: Any, llm: Any, embedding: Any) -> None:
+    def __init__(self, graph: Any, llm: Any, embedding: Any, redis_store: Any = None) -> None:
         self.graph = graph
         self.llm = llm
         self.embedding = embedding
+        # Optional Redis vector backend. When available, the nearest-node lookup
+        # is served by Redis KNN; otherwise it falls back to in-process cosine.
+        self.redis_store = redis_store
+        self.last_vector_backend: str = "in-process"
 
     # --- 1) anchor extraction ----------------------------------------------
 
@@ -184,11 +188,18 @@ class RetrievalService:
             f"FRAGMENTS: {fragments}\n"
             f"CONTEXT: {context or '(none)'}"
         )
+        from app.tracing import llm_span
+
         try:
-            raw = self.llm.generate(user, system=system)
+            with llm_span("anchor_extraction", model=self._llm_model(), input_value=user) as _s:
+                raw = self.llm.generate(user, system=system)
+                _s.set_output(raw)
         except Exception:
             return []
         return _parse_str_list(raw)
+
+    def _llm_model(self) -> str:
+        return getattr(self.llm, "model", "") or ""
 
     def _match_mention(
         self,
@@ -303,10 +314,37 @@ class RetrievalService:
     def vector_retrieve(
         self, query_emb: np.ndarray, embs: dict[str, np.ndarray], top_n: int
     ) -> list[tuple[str, float]]:
-        """Top-N (node_id, semantic) by cosine over all node embeddings."""
+        """Top-N (node_id, semantic) by cosine over all node embeddings (in-process)."""
         scored = [(nid, max(0.0, _cos(query_emb, v))) for nid, v in embs.items()]
         scored.sort(key=lambda t: t[1], reverse=True)
         return scored[:top_n]
+
+    def vector_retrieve_backed(
+        self,
+        person_id: str,
+        query_emb: np.ndarray,
+        embs: dict[str, np.ndarray],
+        top_n: int,
+        pnode_list: list[dict] | None = None,
+    ) -> list[tuple[str, float]]:
+        """Top-N nearest nodes, served by Redis KNN when available.
+
+        Redis uses a FLAT/COSINE index, so the returned nearest-node set is
+        identical to the in-process cosine ranking. Falls back to in-process on
+        any unavailability/error. Records which backend served the request in
+        ``self.last_vector_backend`` for the trace.
+        """
+        rs = self.redis_store
+        if rs is not None and getattr(rs, "available", False) and getattr(rs, "has_search", False):
+            nodes = pnode_list or [{"id": nid, "embedding": v} for nid, v in embs.items()]
+            if rs.sync_person(person_id, nodes):
+                hits = rs.knn(person_id, query_emb, top_n)
+                if hits is not None:
+                    self.last_vector_backend = "redis-knn"
+                    # Keep only ids we actually hold embeddings for (defensive).
+                    return [(nid, sim) for nid, sim in hits if nid in embs]
+        self.last_vector_backend = "in-process"
+        return self.vector_retrieve(query_emb, embs, top_n)
 
     # --- 6) facts assembly --------------------------------------------------
 
@@ -433,9 +471,12 @@ class RetrievalService:
             {"node_ids": [], "edge_ids": [], "hops": {}}
         hops_map: dict[str, int] = dict(nb.get("hops", {}))
 
-        # 3) vector retrieval (union into the subgraph)
+        # 3) vector retrieval (union into the subgraph) — Redis KNN when enabled,
+        #    else in-process cosine. FLAT/COSINE makes the two identical.
         top_n = int(settings.retrieval_top_k)
-        vec_top = self.vector_retrieve(query_emb, embs, top_n)
+        vec_top = self.vector_retrieve_backed(
+            person_id, query_emb, embs, top_n, pnode_list=pnode_list
+        )
         vec_ids = [nid for nid, _ in vec_top]
 
         candidate_ids = list(dict.fromkeys([*anchors, *nb.get("node_ids", []), *vec_ids]))
@@ -556,4 +597,5 @@ class RetrievalService:
             "selection": selection_debug,
             "candidate_pool_ids": pool_ids,
             "topk": ranked[:budget],
+            "vector_backend": self.last_vector_backend,
         }

@@ -81,7 +81,15 @@ def get_embedding_provider() -> EmbeddingProvider:
 
 
 def get_stt_provider() -> STTProvider:
-    """Return the configured STT provider (default: local faster-whisper)."""
+    """Return the configured STT provider (default: local faster-whisper).
+
+    Cloud Deepgram is opt-in via STT_PROVIDER=deepgram. If it is selected but no
+    DEEPGRAM_API_KEY is configured, we fall back to local Whisper rather than
+    returning empty transcripts — this keeps the offline/airplane path intact
+    even when someone flips the provider env without supplying a key.
+    """
+    import logging
+
     settings = _settings()
     provider = (getattr(settings, "stt_provider", None) or "whisper").lower()
     mapping = {
@@ -92,6 +100,12 @@ def get_stt_provider() -> STTProvider:
         "deepgram": DeepgramProvider,
     }
     cls = mapping.get(provider, WhisperLocalProvider)
+    if cls is DeepgramProvider and not (getattr(settings, "deepgram_api_key", "") or "").strip():
+        logging.getLogger("lucid_voice.stt").warning(
+            "STT_PROVIDER=deepgram but DEEPGRAM_API_KEY is empty; "
+            "falling back to local Whisper (offline)."
+        )
+        cls = WhisperLocalProvider
     return cls()
 
 

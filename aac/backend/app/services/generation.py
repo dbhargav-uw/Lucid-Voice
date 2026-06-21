@@ -133,12 +133,17 @@ class GenerationService:
         style_prompt: str = "",
     ) -> list[dict[str, Any]]:
         """Produce up to three Candidate-shaped dicts (never raises)."""
+        from app.tracing import llm_span
+
         valid_ids = set(valid_node_ids or [])
         user_prompt = self._build_user_prompt(fragments, context, retrieved_facts, style_prompt)
+        model = getattr(self.llm, "model", "") or ""
 
         # First attempt.
         try:
-            raw = self.llm.generate(user_prompt, system=SYSTEM_PROMPT)
+            with llm_span("candidate_generation", model=model, input_value=user_prompt) as _s:
+                raw = self.llm.generate(user_prompt, system=SYSTEM_PROMPT)
+                _s.set_output(raw)
         except Exception:
             return self._fallback(fragments)
 

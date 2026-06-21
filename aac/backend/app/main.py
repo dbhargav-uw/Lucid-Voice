@@ -17,6 +17,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
+from app.observability import init_sentry, add_breadcrumb, set_tag, span
+from app.tracing import init_tracing
 from app.models import (
     AssistantTurnRequest,
     AssistantTurnResponse,
@@ -41,6 +43,13 @@ from app.models import (
 
 logger = logging.getLogger("lucid_voice")
 
+# Initialize Sentry as early as possible (before the app/middleware are built) so
+# the FastAPI/Starlette integrations capture every request. No-op without a DSN.
+init_sentry()
+
+# Initialize Phoenix/OpenInference LLM tracing. No-op unless PHOENIX_ENABLED.
+init_tracing()
+
 app = FastAPI(title="Lucid Voice")
 
 # CORS for the Vite dev server.
@@ -55,8 +64,34 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Most recent /generate trace, served by GET /trace/latest.
+# Most recent /generate trace, served by GET /trace/latest. Kept in-process as
+# the fallback; mirrored to Redis (agent/session memory) when Redis is enabled.
 latest_trace: dict = {}
+
+
+def _store_trace(trace: dict) -> None:
+    """Persist the latest trace in-process AND in Redis (when available)."""
+    global latest_trace
+    latest_trace = trace
+    rs = _get("redis")
+    if rs is not None and getattr(rs, "available", False):
+        try:
+            rs.set_latest_trace(trace)
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning("redis set_latest_trace failed: %s", exc)
+
+
+def _read_trace() -> dict:
+    """Read the latest trace from Redis when available, else in-process."""
+    rs = _get("redis")
+    if rs is not None and getattr(rs, "available", False):
+        try:
+            v = rs.get_latest_trace()
+            if v is not None:
+                return v
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning("redis get_latest_trace failed: %s", exc)
+    return latest_trace
 
 
 # --- Lazy service / provider wiring -----------------------------------------
@@ -93,10 +128,16 @@ def _get(name: str):
             from app.providers import get_llm_provider
 
             inst = get_llm_provider()
+        elif name == "redis":
+            from app.services.redis_store import get_redis_store
+
+            inst = get_redis_store()
         elif name == "retrieval":
             from app.services.retrieval import RetrievalService
 
-            inst = RetrievalService(_get("graph"), _get("llm"), _get("embedding"))
+            inst = RetrievalService(
+                _get("graph"), _get("llm"), _get("embedding"), redis_store=_get("redis")
+            )
         elif name == "generation":
             from app.services.generation import GenerationService
 
@@ -155,12 +196,20 @@ def _provider_status() -> dict:
     Reflects the env-selected provider names without instantiating heavy
     providers, so this stays cheap and import-safe.
     """
-    return {
+    status = {
         "llm": settings.llm_provider,
         "embedding": settings.embedding_provider,
         "stt": settings.stt_provider,
         "tts": settings.tts_provider,
+        "sentry": "on" if getattr(settings, "sentry_dsn", "") else "off",
     }
+    # Redis (vector KNN + cache + agent memory) — reflect live availability.
+    if getattr(settings, "redis_enabled", False):
+        rs = _get("redis")
+        status["redis"] = rs.status() if rs is not None else {"enabled": True, "available": False}
+    else:
+        status["redis"] = {"enabled": False, "available": False}
+    return status
 
 
 # --- Endpoints --------------------------------------------------------------
@@ -187,6 +236,12 @@ def generate(req: GenerateRequest) -> GenerateResponse:
     global latest_trace
     t0 = time.time()
 
+    set_tag("person_id", req.person_id)
+    add_breadcrumb(
+        "generation", "generate() called", level="info",
+        fragment_count=len(req.fragments or []), has_context=bool(req.context),
+    )
+
     retrieval = get_retrieval_service()
     generation = get_generation_service()
 
@@ -195,13 +250,19 @@ def generate(req: GenerateRequest) -> GenerateResponse:
         info = RetrievalInfo()
         trace = {"phase": "degraded", "reason": "retrieval/generation unavailable",
                  "person_id": req.person_id, "fragments": req.fragments}
-        latest_trace = trace
+        _store_trace(trace)
         return GenerateResponse(candidates=[], retrieval=info, trace=trace,
                                 abstain=True,
                                 abstain_reason="The local engine is not available right now.")
 
-    r = retrieval.retrieve(req.person_id, req.fragments, req.context or "", req.situation)
+    with span("retrieval.retrieve", "hybrid GraphRAG grounding"):
+        r = retrieval.retrieve(req.person_id, req.fragments, req.context or "", req.situation)
     info = RetrievalInfo(**r["retrieval"])
+    add_breadcrumb(
+        "generation", "retrieval complete", level="info",
+        confidence=r.get("confidence"), abstain=bool(r.get("abstain")),
+        subgraph_nodes=len(r["retrieval"]["subgraph_node_ids"]),
+    )
 
     if r.get("abstain"):
         trace = {
@@ -216,7 +277,7 @@ def generate(req: GenerateRequest) -> GenerateResponse:
             "candidates": [],
             "topk": r.get("topk", []),
         }
-        latest_trace = trace
+        _store_trace(trace)
         return GenerateResponse(candidates=[], retrieval=info, trace=trace,
                                 abstain=True, abstain_reason=r.get("abstain_reason"))
 
@@ -230,9 +291,14 @@ def generate(req: GenerateRequest) -> GenerateResponse:
         except Exception as exc:  # pragma: no cover - defensive
             logger.warning("style_prompt failed: %s", exc)
 
-    candidates = generation.generate_candidates(
-        req.fragments, req.context or "", r["context_block"],
-        valid_node_ids=r["grounded_ids"], style_prompt=style_prompt,
+    with span("generation.generate_candidates", "LLM candidate reconstruction"):
+        candidates = generation.generate_candidates(
+            req.fragments, req.context or "", r["context_block"],
+            valid_node_ids=r["grounded_ids"], style_prompt=style_prompt,
+        )
+    add_breadcrumb(
+        "generation", "candidates generated", level="info",
+        candidate_count=len(candidates),
     )
 
     style_fit_info: list = []
@@ -273,8 +339,9 @@ def generate(req: GenerateRequest) -> GenerateResponse:
         "selection": r.get("selection"),          # submodular vs top-k A/B + metrics
         "candidate_pool_ids": r.get("candidate_pool_ids", []),
         "topk": r.get("topk", []),
+        "vector_backend": r.get("vector_backend", "in-process"),
     }
-    latest_trace = trace
+    _store_trace(trace)
 
     return GenerateResponse(
         candidates=[Candidate(**c) for c in candidates],
@@ -361,6 +428,14 @@ def confirm(req: ConfirmRequest) -> ConfirmResponse:
             style = style_svc.observe_confirm(req.person_id, req.text, cands, req.partner)
         except Exception as exc:  # pragma: no cover - defensive
             logger.warning("style update failed: %s", exc)
+
+    # Agent/session memory: remember recently confirmed utterances (Redis-backed).
+    rs = _get("redis")
+    if rs is not None and getattr(rs, "available", False):
+        try:
+            rs.push_confirmed(req.person_id, req.text)
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning("redis push_confirmed failed: %s", exc)
 
     return ConfirmResponse(
         changed_node_ids=result["changed_node_ids"],
@@ -468,4 +543,16 @@ def graph(person_id: str) -> GraphResponse:
 @app.get("/trace/latest")
 def trace_latest() -> dict:
     """Return the trace produced by the most recent /generate call."""
-    return latest_trace
+    return _read_trace()
+
+
+@app.get("/debug/sentry-error")
+def debug_sentry_error() -> dict:
+    """Deliberately raise so Sentry (when a DSN is configured) captures it.
+
+    With SENTRY_DSN set, the FastAPI integration reports this unhandled exception
+    to Sentry; with no DSN it simply returns a normal 500 and nothing is sent.
+    Used to demonstrate error monitoring live.
+    """
+    add_breadcrumb("debug", "about to raise a test error", level="warning")
+    raise RuntimeError("Lucid Voice test error — Sentry capture check.")
