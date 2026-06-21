@@ -8,60 +8,115 @@ import { motion } from "framer-motion";
 import { Lightning } from "@phosphor-icons/react";
 import type { VocabTile } from "./VocabBoard";
 
-// Local co-occurrence map: last fragment -> likely next fragments.
+// How many predictive words to show (wraps to ~2 rows; quick access).
+const COUNT = 8;
+
+// Local co-occurrence map: last fragment -> likely continuations.
 const NEXT_MAP: Record<string, string[]> = {
-  tired: ["maybe", "later", "rest"],
-  cold: ["window", "blanket"],
-  maybe: ["later", "tomorrow"],
-  window: ["cold", "open"],
-  help: ["please", "now"],
+  tired: ["maybe", "later", "rest", "not sure", "sorry"],
+  cold: ["window", "blanket", "please"],
+  maybe: ["later", "tomorrow", "not sure", "soon"],
+  window: ["cold", "open", "please"],
+  help: ["please", "now", "thank you"],
+  yes: ["please", "thank you", "soon"],
+  no: ["sorry", "thank you", "maybe"],
+  later: ["maybe", "tomorrow", "soon"],
+  okay: ["thank you", "love", "soon"],
+  rest: ["later", "soon", "thank you"],
+  love: ["you too", "soon", "always"],
+  happy: ["thank you", "love", "yes"],
 };
 
-// Generic starting point when nothing is tapped and the partner context gives
-// no signal.
-const DEFAULT_SUGGESTIONS = ["tired", "cold", "help", "yes"];
-
-// Context-keyed openers — the first words ADAPT to what the partner just said,
-// matched by keyword on the latest partner utterance (first match wins).
-const CONTEXT_STARTERS: { match: RegExp; words: string[] }[] = [
-  { match: /\b(dinner|eat|food|lunch|breakfast|come over|visit)\b/i, words: ["tired", "maybe", "yes", "later"] },
-  { match: /\b(play|game|toy|toys)\b/i, words: ["tired", "later", "maybe", "soon"] },
-  { match: /\b(okay|alright|feeling|how are you|sad|sick|tired)\b/i, words: ["okay", "tired", "happy", "thank you"] },
-  { match: /\b(bring|need|want|anything|soup|water|help)\b/i, words: ["yes", "no", "water", "thank you"] },
-  { match: /\b(rest|nap|sleep)\b/i, words: ["yes", "later", "thank you", "okay"] },
-  { match: /\b(love|miss|hug)\b/i, words: ["love", "yes", "happy", "thank you"] },
-  { match: /\b(time|tomorrow|when|later|call)\b/i, words: ["tomorrow", "later", "maybe", "okay"] },
+// Always-useful AAC words, used to pad the row up to COUNT.
+const POOL = [
+  "yes", "no", "maybe", "thank you", "please", "tired", "okay", "later",
+  "love", "help", "water", "rest", "sorry", "soon",
 ];
 
-function starterSuggestions(context?: string): string[] {
-  const c = (context ?? "").trim();
-  if (c) {
-    for (const { match, words } of CONTEXT_STARTERS) {
-      if (match.test(c)) return words;
-    }
+// Generic answers when the partner context gives no keyword signal.
+const GENERIC_ANSWERS = ["yes", "no", "maybe", "thank you", "please", "tired", "okay", "later"];
+
+// Intent categories — the partner's line can match SEVERAL; words from every
+// match are combined (in order) so the suggestions reflect the whole utterance,
+// not just the first keyword hit. Words are reply-oriented (how Elena answers).
+const CONTEXT_STARTERS: { match: RegExp; words: string[] }[] = [
+  {
+    match: /\b(dinner|eat|eating|food|meal|lunch|breakfast|hungry|cook|come over|visit|over)\b/i,
+    words: ["yes", "maybe", "tired", "later", "love", "thank you", "not sure", "hungry"],
+  },
+  {
+    match: /\b(play|playing|game|games|toy|toys|fun)\b/i,
+    words: ["maybe", "later", "tired", "soon", "love", "yes", "after", "nap"],
+  },
+  {
+    match: /\b(feeling|feel|okay|ok|alright|how are you|sad|sick|hurt|pain|sleepy)\b/i,
+    words: ["okay", "tired", "fine", "happy", "love", "thank you", "better", "resting"],
+  },
+  {
+    match: /\b(bring|need|want|anything|something|soup|water|drink|blanket)\b/i,
+    words: ["yes", "no", "water", "thank you", "please", "rest", "soup", "blanket"],
+  },
+  {
+    match: /\b(rest|nap|sleep|lie down|relax)\b/i,
+    words: ["yes", "later", "thank you", "okay", "tired", "soon", "please", "now"],
+  },
+  {
+    match: /\b(love|miss|hug|kiss|care)\b/i,
+    words: ["love", "yes", "happy", "thank you", "you too", "always", "soon", "okay"],
+  },
+  {
+    match: /\b(time|when|tomorrow|today|tonight|call|phone|weekend|morning|evening|later|soon)\b/i,
+    words: ["tomorrow", "later", "maybe", "okay", "soon", "yes", "weekend", "morning"],
+  },
+];
+
+// Dedupe (case-insensitive), drop words already on the strip, then pad from POOL
+// up to `count`, so the row is always full and easy to scan.
+function fillTo(seed: string[], exclude: Set<string>, count: number): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  const add = (w: string) => {
+    const k = w.toLowerCase().trim();
+    if (!k || seen.has(k) || exclude.has(k)) return;
+    seen.add(k);
+    out.push(w);
+  };
+  seed.forEach(add);
+  for (const w of POOL) {
+    if (out.length >= count) break;
+    add(w);
   }
-  return DEFAULT_SUGGESTIONS;
+  return out.slice(0, count);
+}
+
+// Combine the words from EVERY matching intent category (order preserved).
+function contextWords(context?: string): string[] {
+  const c = (context ?? "").trim();
+  if (!c) return GENERIC_ANSWERS;
+  const collected: string[] = [];
+  for (const { match, words } of CONTEXT_STARTERS) {
+    if (match.test(c)) collected.push(...words);
+  }
+  return collected.length ? collected : GENERIC_ANSWERS;
 }
 
 export interface NextFragmentsProps {
   fragments: string[];
-  // The latest partner utterance — used to seed the first suggestions.
+  // The latest partner utterance — used to seed the suggestions.
   context?: string;
   // Mirrors the vocab-tile contract so the view can reuse handleTileTap.
   onSuggest: (tile: VocabTile) => void;
 }
 
 function suggestionsFor(fragments: string[], context?: string): string[] {
-  if (fragments.length === 0) return starterSuggestions(context);
-  const last = fragments[fragments.length - 1]?.toLowerCase().trim() ?? "";
-  const next = NEXT_MAP[last];
-  if (next && next.length > 0) {
-    // Don't re-suggest words already on the strip.
-    const have = new Set(fragments.map((f) => f.toLowerCase().trim()));
-    const filtered = next.filter((w) => !have.has(w));
-    return filtered.length > 0 ? filtered : next;
+  const have = new Set(fragments.map((f) => f.toLowerCase().trim()));
+  if (fragments.length === 0) {
+    return fillTo(contextWords(context), have, COUNT);
   }
-  return starterSuggestions(context);
+  // Mid-construction: continuations of the last word first, then context, then pad.
+  const last = fragments[fragments.length - 1]?.toLowerCase().trim() ?? "";
+  const cont = NEXT_MAP[last] ?? [];
+  return fillTo([...cont, ...contextWords(context)], have, COUNT);
 }
 
 export default function NextFragments({ fragments, context, onSuggest }: NextFragmentsProps) {
