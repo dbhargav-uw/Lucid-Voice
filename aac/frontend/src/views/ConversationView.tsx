@@ -1,12 +1,14 @@
 // ConversationView — speaker-attributed conversation surface + a real record
-// "sound bar". Visual-only (LIGHT theme); the /stt wiring lands later — the
-// existing `recording` toggle behavior is preserved. Coral = the user (Elena);
-// teal/neutral = the partner & machine.
+// "sound bar". The mic records the partner via MediaRecorder and transcribes it
+// through the local-Whisper /stt endpoint (offline; the browser's webm/opus is
+// decoded server-side with ffmpeg). Coral = the user (Elena); teal/neutral =
+// the partner & machine.
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { motion, useReducedMotion, AnimatePresence } from "framer-motion";
 import { Microphone, MicrophoneSlash, ChatsCircle } from "@phosphor-icons/react";
 import { EASE_OUT, DUR, SPRING } from "../lib/motion";
+import { stt } from "../lib/api";
 
 interface TranscriptEntry {
   id: string;
@@ -165,31 +167,108 @@ function LevelStrip({ active }: { active: boolean }) {
   );
 }
 
-export default function ConversationView() {
-  const [recording, setRecording] = useState(false);
-  const [transcript, setTranscript] = useState<TranscriptEntry[]>(SEED_TURNS);
+type RecordStatus = "idle" | "recording" | "transcribing";
 
-  function handleToggleRecord() {
-    // TODO (later phase): start/stop MediaRecorder; on stop, encode audio_base64
-    //   and call stt({ audio_base64 }), then append the result to the transcript.
-    setRecording((r) => {
-      // On stopping, append a believable partner turn so the surface reacts.
-      if (r) {
-        setTranscript((t) => [
-          ...t,
-          {
-            id: `live-${t.length}`,
-            speaker: "partner",
-            name: "Sofia",
-            text: "Take your time, Mom — there's no rush at all.",
-            time: "now",
-          },
-        ]);
-      }
-      return !r;
-    });
+// ArrayBuffer/Blob -> base64 (chunked to avoid call-stack limits on big buffers).
+async function blobToBase64(blob: Blob): Promise<string> {
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  let binary = "";
+  const CHUNK = 0x8000;
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+  }
+  return btoa(binary);
+}
+
+export default function ConversationView() {
+  const [status, setStatus] = useState<RecordStatus>("idle");
+  const [transcript, setTranscript] = useState<TranscriptEntry[]>(SEED_TURNS);
+  const [hint, setHint] = useState<string | null>(null);
+
+  const recorderRef = useRef<MediaRecorder | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
+  const streamRef = useRef<MediaStream | null>(null);
+
+  const recording = status === "recording";
+
+  function stopTracks() {
+    streamRef.current?.getTracks().forEach((t) => t.stop());
+    streamRef.current = null;
   }
 
+  function appendTurn(text: string) {
+    setTranscript((t) => [
+      ...t,
+      {
+        id: `live-${Date.now()}`,
+        speaker: "partner",
+        name: "Partner",
+        text,
+        time: new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }),
+      },
+    ]);
+  }
+
+  async function startRecording() {
+    setHint(null);
+    let stream: MediaStream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch {
+      setHint("Microphone access was blocked — allow mic permission to transcribe.");
+      return;
+    }
+    streamRef.current = stream;
+    chunksRef.current = [];
+    const recorder = new MediaRecorder(stream);
+    recorderRef.current = recorder;
+    recorder.ondataavailable = (e) => {
+      if (e.data.size > 0) chunksRef.current.push(e.data);
+    };
+    recorder.onstop = async () => {
+      stopTracks();
+      const blob = new Blob(chunksRef.current, { type: recorder.mimeType || "audio/webm" });
+      chunksRef.current = [];
+      if (blob.size === 0) {
+        setStatus("idle");
+        return;
+      }
+      setStatus("transcribing");
+      try {
+        const { text } = await stt({ audio_base64: await blobToBase64(blob) });
+        const clean = text.trim();
+        if (clean) appendTurn(clean);
+        else setHint("Didn't catch that — try again, a little closer to the mic.");
+      } catch {
+        setHint("Couldn't reach transcription — is the backend running?");
+      } finally {
+        setStatus("idle");
+      }
+    };
+    recorder.start();
+    setStatus("recording");
+  }
+
+  function handleToggleRecord() {
+    if (status === "recording") recorderRef.current?.stop();
+    else if (status === "idle") void startRecording();
+  }
+
+  // Stop the mic + recorder if we leave the view mid-capture.
+  useEffect(
+    () => () => {
+      try {
+        recorderRef.current?.stop();
+      } catch {
+        /* no-op */
+      }
+      stopTracks();
+    },
+    [],
+  );
+
+  const statusText =
+    status === "recording" ? "Listening…" : status === "transcribing" ? "Transcribing…" : "Listen to partner";
   const hasTurns = transcript.length > 0;
 
   return (
@@ -237,11 +316,16 @@ export default function ConversationView() {
             whileTap={{ scale: 0.94 }}
             transition={SPRING}
             onClick={handleToggleRecord}
+            disabled={status === "transcribing"}
             aria-pressed={recording}
             aria-label={recording ? "Stop listening" : "Listen to partner"}
             className={[
               "relative z-10 flex h-14 w-14 items-center justify-center rounded-full text-on-voice shadow-utter transition-colors duration-base",
-              recording ? "bg-voice-deep" : "bg-voice hover:bg-voice-deep",
+              status === "transcribing"
+                ? "cursor-wait bg-voice/60"
+                : recording
+                ? "bg-voice-deep"
+                : "bg-voice hover:bg-voice-deep",
             ].join(" ")}
           >
             {recording ? (
@@ -260,9 +344,15 @@ export default function ConversationView() {
             recording ? "text-voice-deep" : "text-text-muted"
           }`}
         >
-          {recording ? "Listening…" : "Listen to partner"}
+          {statusText}
         </span>
       </div>
+
+      {hint && (
+        <p aria-live="polite" className="m-0 px-1 text-center font-ui text-[0.85rem] text-text-muted">
+          {hint}
+        </p>
+      )}
     </div>
   );
 }
