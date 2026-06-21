@@ -1,14 +1,12 @@
-import { NavLink, Route, Routes, useLocation } from "react-router-dom";
+import { NavLink, Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { AnimatePresence, MotionConfig, motion } from "framer-motion";
 import { CaretDown } from "@phosphor-icons/react";
-import SpeakerView from "./views/SpeakerView";
 import ConversationView from "./views/ConversationView";
 import GraphView from "./views/GraphView";
 import { DUR, EASE_OUT } from "./lib/motion";
 
 const NAV_ITEMS = [
-  { to: "/", label: "Speak", end: true },
-  { to: "/conversation", label: "Conversation", end: false },
+  { to: "/", label: "Conversation", end: true },
   { to: "/graph", label: "Graph", end: false },
 ];
 
@@ -96,8 +94,8 @@ export default function App() {
             className="h-full"
           >
             <Routes location={location}>
-              <Route path="/" element={<SpeakerView />} />
-              <Route path="/conversation" element={<ConversationView />} />
+              <Route path="/" element={<ConversationView />} />
+              <Route path="/conversation" element={<Navigate to="/" replace />} />
               <Route path="/graph" element={<GraphView />} />
             </Routes>
           </motion.div>

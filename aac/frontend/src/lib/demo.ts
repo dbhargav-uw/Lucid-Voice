@@ -1,8 +1,8 @@
 // Lucid Voice — deterministic demo fallback.
 //
 // When the live backend is unreachable, abstains, or returns zero candidates,
-// the Speaker view falls back to this bundled content so the demo ALWAYS has
-// rich candidates + a live reasoning rail. Content is keyed by the same
+// ConversationView's handleGenerate falls back to this bundled content so the
+// demo ALWAYS has rich, divergent candidates. Content is keyed by the same
 // signature the backend uses: `frag1|frag2|...||context`.
 
 import type { Candidate, GenerateResponse } from "./api";

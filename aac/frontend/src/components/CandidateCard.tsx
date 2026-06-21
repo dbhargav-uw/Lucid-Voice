@@ -19,6 +19,8 @@ export interface CandidateCardProps {
   selected?: boolean;
   rejected?: boolean;
   playing?: boolean;
+  // Locks the "Say this" action during the speak beat (prevents double-commit).
+  disabled?: boolean;
   onSay: (candidate: Candidate) => void;
 }
 
@@ -35,6 +37,7 @@ export default function CandidateCard({
   selected = false,
   rejected = false,
   playing = false,
+  disabled = false,
   onSay,
 }: CandidateCardProps) {
   const reg = REGISTER_META[candidate.register];
@@ -89,9 +92,10 @@ export default function CandidateCard({
       <div className="flex items-center gap-4">
         <motion.button
           type="button"
-          whileTap={reduce ? undefined : { scale: 0.97 }}
+          whileTap={reduce || disabled ? undefined : { scale: 0.97 }}
           onClick={() => onSay(candidate)}
-          className="btn-cta rounded-md bg-voice font-ui text-[1.05rem] font-semibold text-on-voice transition-colors duration-base hover:bg-voice-deep"
+          disabled={disabled}
+          className="btn-cta rounded-md bg-voice font-ui text-[1.05rem] font-semibold text-on-voice transition-colors duration-base hover:bg-voice-deep disabled:cursor-default disabled:opacity-50 disabled:hover:bg-voice"
         >
           <SpeakerHigh size={20} weight="fill" aria-hidden />
           Say this

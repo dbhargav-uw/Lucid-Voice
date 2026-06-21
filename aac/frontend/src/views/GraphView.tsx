@@ -507,7 +507,7 @@ export default function GraphView() {
 
         {!meta && (
           <div style={{ fontSize: 13, color: TEXT_MUTED, marginBottom: 16 }}>
-            No reconstruction yet. Trigger one below (or from the Speak view).
+            No reconstruction yet. Trigger one below (or from the Conversation view).
           </div>
         )}
 

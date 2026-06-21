@@ -80,6 +80,14 @@ export function useSpeak(personId: string): UseSpeak {
     window.speechSynthesis?.addEventListener?.("voiceschanged", onVoices);
     return () => {
       window.speechSynthesis?.removeEventListener?.("voiceschanged", onVoices);
+      // Stop any in-flight cloned-voice playback before revoking its URL, else
+      // the sentence keeps playing after navigating away from the view.
+      try {
+        audioRef.current?.pause();
+      } catch {
+        /* no-op */
+      }
+      audioRef.current = null;
       if (urlRef.current) URL.revokeObjectURL(urlRef.current);
       try {
         window.speechSynthesis?.cancel();
@@ -127,6 +135,14 @@ export function useSpeak(personId: string): UseSpeak {
     async (text: string) => {
       const trimmed = text.trim();
       if (!trimmed) return;
+
+      // Stop any prior playback so a rapid second utterance doesn't overlap.
+      try {
+        audioRef.current?.pause();
+        window.speechSynthesis?.cancel();
+      } catch {
+        /* no-op */
+      }
 
       setPlaying(true);
       try {
