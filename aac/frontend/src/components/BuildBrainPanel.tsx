@@ -150,7 +150,11 @@ export default function BuildBrainPanel({ personId, onConfirmed, onGenerated, on
     let confidence = 0;
     let latency = 0;
     try {
-      const res = await generate({ person_id: personId, fragments, context: question });
+      // Frame the context as the question being answered so the reconstruction
+      // is shaped as a direct answer (not just a generic reply). The transcript
+      // and /confirm still use the clean question text.
+      const askedContext = `The assistant is getting to know you and asked: "${question}" Answer it about your life.`;
+      const res = await generate({ person_id: personId, fragments, context: askedContext });
       confidence = res.retrieval?.confidence ?? 0;
       latency = Number((res.trace as Record<string, unknown>)?.latency_ms ?? 0);
       if (!res.abstain) cands = res.candidates ?? [];
