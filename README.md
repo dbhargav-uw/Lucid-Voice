@@ -1,10 +1,16 @@
 <div align="center">
 
-# ◐ Lucid Voice
+<img src="docs/logo.png" alt="Lucid Voice" width="440" />
 
 ### Speak again — in your own voice.
 
 **A local-first AAC app that turns 2–3 tapped words into a full, situationally‑correct sentence — spoken in a cloned version of the user's own voice.**
+
+<br/>
+
+<img src="docs/brain.jpg" alt="The Lucid Voice memory graph, firing" width="760" />
+
+<sub>The user's personal memory graph, rendered as a living brain. The exact memories that grounded a reply light up in real time.</sub>
 
 </div>
 
@@ -55,16 +61,6 @@ Identical input. The wording, the term of endearment, even the promise of a nap 
 - 🌀 **Show your work** — a 3D **hologram‑brain** view (`/graph`) where the retrieved memories *fire* the path that grounded each reply. Plus **"Build your brain,"** where a warm AI interviews you and each answer **blooms** a new memory onto the graph, live.
 - 📈 **Online learning loop** — every confirmation reinforces the graph; a consolidation pass promotes recurring patterns into durable preferences; and a scheduled decay pass (`run_decay`) fades what goes unused.
 - ✈️ **On‑device & airplane‑mode capable** — local LLM, STT, TTS, embeddings and graph. Cloud providers are strictly opt‑in.
-
-## The demo (≈3 minutes, re‑runnable)
-
-The demo persona is **Elena, 67** — expressive aphasia after a stroke, retired Spanish teacher; husband Marco, daughter Sofia ("sweetie"), grandson Mateo ("mijo").
-
-1. **Basic magic** — taps `cold · window` → *"Could you close the window? I'm getting cold."*
-2. **Conversational context** — partner asks *"Mom, do you want to come for dinner Sunday?"* (heard via STT) → taps `tired · maybe` → the warm, commitment‑averse "sweetie / Saturday" reply.
-3. **Same input diverges** — the grandson asks *"will you play with me?"* → the **same** `tired · maybe` → the "mijo / after my nap" reply. *(The proof.)*
-
-Set `DEMO_MODE=true` to run deterministically against bundled fixtures (no LM Studio, no model downloads, no network) — ideal for a reliable stage demo.
 
 ## Architecture
 
