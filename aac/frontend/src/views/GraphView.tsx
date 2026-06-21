@@ -457,26 +457,17 @@ export default function GraphView() {
           </div>
         </div>
 
-        {/* Top-right overlay stack: memory growth + (Build Your Brain) reconstruction. */}
+        {/* Memory growth (top-right). */}
         <div
           style={{
+            ...CARD_STYLE,
             position: "absolute",
             top: 14,
             right: 14,
             width: 320,
             display: "flex",
             flexDirection: "column",
-            gap: 10,
-            maxHeight: "calc(100% - 28px)",
-          }}
-        >
-        <div
-          style={{
-            ...CARD_STYLE,
-            display: "flex",
-            flexDirection: "column",
             gap: 8,
-            flexShrink: 0,
           }}
         >
           <div
@@ -547,17 +538,22 @@ export default function GraphView() {
           </div>
         </div>
 
-        {/* Reconstruction overlay (Build Your Brain) — same width as memory
-            growth, docked below it, scrollable so everything fits. */}
+        {/* Reconstruction overlay (Build Your Brain) — compact, locked to the
+            bottom-right so the brain stays centered; scrollable so it all fits. */}
         {byb && (
           <div
             className="scroll-ink"
             style={{
               ...CARD_STYLE,
+              position: "absolute",
+              bottom: 14,
+              right: 14,
+              width: 296,
+              maxHeight: "min(46vh, 420px)",
+              padding: "9px 11px",
               display: "flex",
               flexDirection: "column",
-              gap: 10,
-              minHeight: 0,
+              gap: 8,
               overflowY: "auto",
             }}
           >
@@ -714,7 +710,6 @@ export default function GraphView() {
             )}
           </div>
         )}
-        </div>
 
         {/* Legend (bottom-left) */}
         <div
