@@ -714,7 +714,7 @@ export default function ConversationView() {
 
               <span
                 aria-live="polite"
-                className={`eyebrow w-[9rem] shrink-0 whitespace-nowrap pr-2 text-right ${
+                className={`eyebrow w-[11rem] shrink-0 whitespace-nowrap pr-6 text-right ${
                   recordStatus !== "idle" ? "text-mind-deep" : "text-text-muted"
                 }`}
               >
