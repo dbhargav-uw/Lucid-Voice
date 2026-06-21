@@ -2,6 +2,7 @@
 // to remove a single fragment; Clear wipes all. Chips fly in as a state change
 // (a word was added), with a subtler exit than enter.
 
+import { useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { X } from "@phosphor-icons/react";
 import { DUR, EASE_OUT } from "../lib/motion";
@@ -10,19 +11,31 @@ export interface ConstructionStripProps {
   fragments: string[];
   onRemove: (index: number) => void;
   onClear: () => void;
+  // When provided, an inline text input lets the user TYPE straight into the
+  // answer box; each Enter adds the typed word/phrase as a fragment.
+  onAddWord?: (word: string) => void;
 }
 
 export default function ConstructionStrip({
   fragments,
   onRemove,
   onClear,
+  onAddWord,
 }: ConstructionStripProps) {
   const empty = fragments.length === 0;
+  const [draft, setDraft] = useState("");
+
+  const submitDraft = () => {
+    const w = draft.trim();
+    if (!w || !onAddWord) return;
+    onAddWord(w);
+    setDraft("");
+  };
 
   return (
     <div className="flex min-h-[64px] items-center gap-3 rounded-lg border border-ink-line bg-ink-raised px-4 py-3 shadow-card">
       <div className="flex flex-1 flex-wrap items-center gap-2">
-        {empty ? (
+        {empty && !onAddWord ? (
           <span className="text-aac-base text-text-faint">Tap words to begin.</span>
         ) : (
           <AnimatePresence initial={false}>
@@ -48,6 +61,23 @@ export default function ConstructionStrip({
               </motion.span>
             ))}
           </AnimatePresence>
+        )}
+        {onAddWord && (
+          <input
+            type="text"
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                submitDraft();
+              }
+            }}
+            onBlur={submitDraft}
+            placeholder={empty ? "Tap or type a word…" : "type a word…"}
+            aria-label="Type a word to add to the answer"
+            className="min-w-[7rem] flex-1 border-0 bg-transparent px-1 font-ui text-aac-base text-text outline-none placeholder:text-text-faint"
+          />
         )}
       </div>
 

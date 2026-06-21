@@ -767,8 +767,13 @@ export default function ConversationView() {
             )}
           </div>
 
-          {/* Construction strip. */}
-          <ConstructionStrip fragments={fragments} onRemove={handleRemove} onClear={handleClear} />
+          {/* Construction strip — tap tiles or type words directly. */}
+          <ConstructionStrip
+            fragments={fragments}
+            onRemove={handleRemove}
+            onClear={handleClear}
+            onAddWord={(w) => handleTileTap({ id: `typed-${w}`, label: w })}
+          />
 
           {/* Predictive next fragments — adapt to the partner's last utterance. */}
           <NextFragments fragments={fragments} context={context} onSuggest={handleTileTap} />

@@ -359,8 +359,7 @@ export default function GraphView() {
       : `Session start: ${startCount} memories.`;
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%", background: INK, color: TEXT }}>
-      <div style={{ display: "flex", flex: 1, minHeight: 0 }}>
+    <div style={{ display: "flex", height: "100%", background: INK, color: TEXT }}>
       {/* Graph canvas — dark viewport so the hologram brain glows (bloom). */}
       <div
         ref={containerRef}
@@ -561,7 +560,20 @@ export default function GraphView() {
         </div>
       </div>
 
-      {/* Side panel */}
+      {/* Right side: Build Your Brain panel (graph stays the canvas on the left),
+          or the Reconstruction panel otherwise. */}
+      {byb ? (
+        <div
+          style={{
+            width: "clamp(420px, 40vw, 560px)",
+            flexShrink: 0,
+            height: "100%",
+            borderLeft: `1px solid ${INK_LINE}`,
+          }}
+        >
+          <BuildBrainPanel personId={PERSON_ID} onConfirmed={handleConfirmed} onExit={exitByb} />
+        </div>
+      ) : (
       <aside
         style={{
           width: 340,
@@ -686,19 +698,6 @@ export default function GraphView() {
           ))}
         </div>
       </aside>
-      </div>
-
-      {/* Build Your Brain dock (below the graph; the graph stays the canvas). */}
-      {byb && (
-        <div
-          style={{
-            height: "clamp(300px, 40vh, 440px)",
-            flexShrink: 0,
-            borderTop: `1px solid ${INK_LINE}`,
-          }}
-        >
-          <BuildBrainPanel personId={PERSON_ID} onConfirmed={handleConfirmed} onExit={exitByb} />
-        </div>
       )}
     </div>
   );

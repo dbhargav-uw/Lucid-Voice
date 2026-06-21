@@ -13,6 +13,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { Brain, Sparkle, CircleNotch, X } from "@phosphor-icons/react";
 import VocabBoard, { type VocabTile } from "./VocabBoard";
 import ConstructionStrip from "./ConstructionStrip";
+import NextFragments from "./NextFragments";
 import CandidateCard from "./CandidateCard";
 import { assistantTurn, generate, confirm } from "../lib/api";
 import type { Candidate, ConfirmResponse, AssistantTurnMessage } from "../lib/api";
@@ -163,9 +164,7 @@ export default function BuildBrainPanel({ personId, onConfirmed, onExit }: Props
         </div>
       </header>
 
-      <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 lg:grid-cols-2">
-        {/* LEFT — the assistant + the answer being composed. */}
-        <section className="scroll-ink flex min-h-0 flex-col gap-3 overflow-y-auto pr-1">
+      <div className="scroll-ink flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto pr-1">
           {/* Assistant question (teal = the machine; distinct from the human coral). */}
           <div className="flex items-start gap-2.5">
             <span
@@ -196,8 +195,16 @@ export default function BuildBrainPanel({ personId, onConfirmed, onExit }: Props
             </div>
           </div>
 
-          {/* Construction strip. */}
-          <ConstructionStrip fragments={fragments} onRemove={removeFrag} onClear={clearFrag} />
+          {/* Construction strip — tap tiles or type words directly. */}
+          <ConstructionStrip
+            fragments={fragments}
+            onRemove={removeFrag}
+            onClear={clearFrag}
+            onAddWord={(w) => tap({ id: `typed-${w}`, label: w })}
+          />
+
+          {/* Predictive next words (8, adapting to the assistant's question). */}
+          <NextFragments fragments={fragments} context={question} onSuggest={tap} />
 
           {/* Answer CTA. */}
           <div className="flex items-center gap-3">
@@ -249,15 +256,14 @@ export default function BuildBrainPanel({ personId, onConfirmed, onExit }: Props
                 ))}
             </AnimatePresence>
           </section>
-        </section>
 
-        {/* RIGHT — the vocabulary tiles (reused). */}
-        <section
-          aria-label="Vocabulary"
-          className="scroll-ink min-h-0 overflow-y-auto rounded-xl border border-ink-line bg-ink-sunken p-3 sm:p-4"
-        >
-          <VocabBoard onTileTap={tap} />
-        </section>
+          {/* Vocabulary tiles (reused) — tap to add words. */}
+          <section
+            aria-label="Vocabulary"
+            className="rounded-xl border border-ink-line bg-ink-sunken p-3 sm:p-4"
+          >
+            <VocabBoard onTileTap={tap} />
+          </section>
       </div>
     </div>
   );
