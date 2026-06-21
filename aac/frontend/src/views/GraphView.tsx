@@ -48,6 +48,12 @@ const CARD_STYLE: CSSProperties = {
   boxShadow: "0 1px 2px 0 rgba(22,26,33,0.04), 0 10px 24px -14px rgba(22,26,33,0.12)",
 };
 
+// Shared size for the bottom corner cards (reconstruction + legend) so they
+// match. 320 matches the memory-growth card width; 210 is ~50% shorter than
+// the reconstruction card's previous height, keeping the brain centered.
+const PANEL_W = 320;
+const PANEL_H = 210;
+
 interface TraceCandidate {
   text: string;
   register: string;
@@ -332,6 +338,16 @@ export default function GraphView() {
     [data],
   );
 
+  // Shared row style for the legend's "how to read" lines.
+  const legendRow: CSSProperties = {
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+    fontSize: 12,
+    color: TEXT_MUTED,
+    lineHeight: 1.3,
+  };
+
   // Reconstruction-overlay stats.
   const nodeCount = data?.nodes.length ?? 0;
   const edgeCount = data?.links.length ?? 0;
@@ -548,8 +564,8 @@ export default function GraphView() {
               position: "absolute",
               bottom: 14,
               right: 14,
-              width: 296,
-              maxHeight: "min(46vh, 420px)",
+              width: PANEL_W,
+              maxHeight: PANEL_H,
               padding: "9px 11px",
               display: "flex",
               flexDirection: "column",
@@ -711,14 +727,15 @@ export default function GraphView() {
           </div>
         )}
 
-        {/* Legend (bottom-left) */}
+        {/* Legend (bottom-left) — same size as the reconstruction card. */}
         <div
           style={{
             ...overlay("bottom"),
             display: "flex",
             flexDirection: "column",
             gap: 8,
-            maxWidth: 380,
+            width: PANEL_W,
+            minHeight: PANEL_H,
           }}
         >
           <div
@@ -732,7 +749,7 @@ export default function GraphView() {
           >
             Legend
           </div>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: "6px 14px" }}>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: "6px 12px" }}>
             {usedKinds.map((k) => (
               <span
                 key={k}
@@ -757,27 +774,56 @@ export default function GraphView() {
               </span>
             ))}
           </div>
+
+          {/* How to read the brain — fills the matched height with useful info. */}
           <div
             style={{
               display: "flex",
-              alignItems: "center",
+              flexDirection: "column",
               gap: 7,
-              fontSize: 12,
-              color: TEXT_MUTED,
-              paddingTop: 2,
+              paddingTop: 8,
+              marginTop: "auto",
               borderTop: `1px solid ${INK_LINE}`,
-              marginTop: 2,
             }}
           >
-            <span
-              style={{
-                width: 14,
-                height: 0,
-                borderTop: `2px solid ${VOICE}`,
-                display: "inline-block",
-              }}
-            />
-            firing pulse: retrieved memory path
+            <span style={legendRow}>
+              <span
+                style={{
+                  width: 11,
+                  height: 11,
+                  borderRadius: "50%",
+                  background: MIND,
+                  boxShadow: `0 0 0 3px ${MIND_SOFT}`,
+                  flexShrink: 0,
+                }}
+              />
+              Each dot is a memory — bigger means more important.
+            </span>
+            <span style={legendRow}>
+              <span
+                style={{ width: 16, height: 0, borderTop: "2px solid #2bd6c6", flexShrink: 0 }}
+              />
+              Lines connect related memories.
+            </span>
+            <span style={legendRow}>
+              <span
+                style={{ width: 16, height: 0, borderTop: `2px solid ${VOICE}`, flexShrink: 0 }}
+              />
+              Firing pulse: a retrieved memory path.
+            </span>
+            <span style={legendRow}>
+              <span
+                style={{
+                  width: 11,
+                  height: 11,
+                  borderRadius: "50%",
+                  background: VOICE,
+                  boxShadow: `0 0 8px ${VOICE}`,
+                  flexShrink: 0,
+                }}
+              />
+              Bloom: a new memory forms as you answer.
+            </span>
           </div>
         </div>
       </div>
