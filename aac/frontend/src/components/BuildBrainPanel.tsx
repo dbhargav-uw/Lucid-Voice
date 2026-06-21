@@ -20,8 +20,11 @@ import type { Candidate, ConfirmResponse, AssistantTurnMessage } from "../lib/ap
 
 interface Props {
   personId: string;
-  // Called after a confirmed answer with the created/reinforced graph elements.
-  onConfirmed: (result: ConfirmResponse) => void;
+  // Called after a confirmed answer with the created/reinforced graph elements
+  // plus the answer text (for the live stats / reconstruction overlay).
+  onConfirmed: (result: ConfirmResponse, answer: string) => void;
+  // Called after each /generate so the overlay can show the reconstruction.
+  onGenerated?: (info: { candidates: Candidate[]; confidence: number; latency: number }) => void;
   onExit: () => void;
 }
 
@@ -29,7 +32,7 @@ type Phase = "asking" | "ready" | "thinking" | "candidates" | "saving";
 
 const FALLBACK_FIRST = "Tell me about someone important in your life.";
 
-export default function BuildBrainPanel({ personId, onConfirmed, onExit }: Props) {
+export default function BuildBrainPanel({ personId, onConfirmed, onGenerated, onExit }: Props) {
   const [history, setHistory] = useState<AssistantTurnMessage[]>([]);
   const [question, setQuestion] = useState<string>("");
   const [phase, setPhase] = useState<Phase>("asking");
@@ -88,8 +91,12 @@ export default function BuildBrainPanel({ personId, onConfirmed, onExit }: Props
     setCandidates([]);
     setSelectedIdx(null);
     let cands: Candidate[] = [];
+    let confidence = 0;
+    let latency = 0;
     try {
       const res = await generate({ person_id: personId, fragments, context: question });
+      confidence = res.retrieval?.confidence ?? 0;
+      latency = Number((res.trace as Record<string, unknown>)?.latency_ms ?? 0);
       if (!res.abstain) cands = res.candidates ?? [];
     } catch {
       cands = [];
@@ -107,6 +114,7 @@ export default function BuildBrainPanel({ personId, onConfirmed, onExit }: Props
         },
       ];
     }
+    onGenerated?.({ candidates: cands, confidence, latency });
     setCandidates(cands);
     setPhase("candidates");
   }
@@ -118,7 +126,7 @@ export default function BuildBrainPanel({ personId, onConfirmed, onExit }: Props
     setPhase("saving");
     try {
       const result = await confirm({ person_id: personId, text: cand.text, context: question });
-      onConfirmed(result);
+      onConfirmed(result, cand.text);
     } catch {
       /* the bloom just won't happen; keep the interview flowing */
     } finally {

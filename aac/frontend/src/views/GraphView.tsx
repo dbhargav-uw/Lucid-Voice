@@ -17,7 +17,7 @@ import {
 import HologramBrain from "../components/HologramBrain";
 import BuildBrainPanel from "../components/BuildBrainPanel";
 import { getGraph, generate } from "../lib/api";
-import type { ConfirmResponse } from "../lib/api";
+import type { ConfirmResponse, Candidate } from "../lib/api";
 import { DUR, EASE_OUT } from "../lib/motion";
 
 const PERSON_ID = "elena";
@@ -36,6 +36,17 @@ const VOICE_DEEP = "#C23A1B";
 const VOICE_SOFT = "#FCE9E3";
 const MIND = "#0C8276"; // THE MACHINE teal
 const MIND_SOFT = "#DBF1ED";
+
+// Shared frosted-card style for the brain-canvas overlays (light on the dark
+// viewport), so the memory-growth and reconstruction cards align and match.
+const CARD_STYLE: CSSProperties = {
+  padding: "10px 13px",
+  borderRadius: 12,
+  background: "rgba(255,255,255,0.86)",
+  backdropFilter: "blur(8px)",
+  border: `1px solid ${INK_LINE}`,
+  boxShadow: "0 1px 2px 0 rgba(22,26,33,0.04), 0 10px 24px -14px rgba(22,26,33,0.12)",
+};
 
 interface TraceCandidate {
   text: string;
@@ -93,6 +104,14 @@ export default function GraphView() {
   const bybRef = useRef(false);
   bybRef.current = byb;
   const bloomTimer = useRef<number | null>(null);
+
+  // Build-Your-Brain session telemetry for the reconstruction overlay.
+  const [recon, setRecon] = useState<
+    { candidates: Candidate[]; confidence: number; latency: number } | null
+  >(null);
+  const [statements, setStatements] = useState<string[]>([]);
+  const [grown, setGrown] = useState({ nodes: 0, edges: 0 });
+  const [genStats, setGenStats] = useState({ sum: 0, count: 0 });
 
   // Memory growth: "after" = full current graph; "start" = sparse first-degree
   // subset. `t` (0 -> 1) is animated by rAF and interpolates the rendered data.
@@ -228,7 +247,12 @@ export default function GraphView() {
   // refetch — existing nodes keep their exact spots) and drive a transient bloom
   // via the existing highlight machinery: new nodes flare (grounded), new +
   // reinforced edges fire, reinforced nodes glow. Clears after a few seconds.
-  const handleConfirmed = useCallback((result: ConfirmResponse) => {
+  const handleConfirmed = useCallback((result: ConfirmResponse, answer?: string) => {
+    setGrown((g) => ({
+      nodes: g.nodes + (result.new_nodes?.length ?? 0),
+      edges: g.edges + (result.new_edges?.length ?? 0),
+    }));
+    if (answer && answer.trim()) setStatements((s) => [...s, answer.trim()]);
     const newNodeIds = (result.new_nodes ?? []).map((n) => n.id);
     const newEdgeIds = (result.new_edges ?? []).map(
       (e) => `${e.source}|${e.type}|${e.target}`,
@@ -272,10 +296,22 @@ export default function GraphView() {
     bloomTimer.current = window.setTimeout(() => setHighlight(EMPTY_HL), 4200);
   }, []);
 
+  const handleGenerated = useCallback(
+    (info: { candidates: Candidate[]; confidence: number; latency: number }) => {
+      setRecon(info);
+      setGenStats((g) => ({ sum: g.sum + (info.confidence || 0), count: g.count + 1 }));
+    },
+    [],
+  );
+
   const enterByb = useCallback(() => {
     setByb(true);
     setMode("after"); // ensure newly-grown (non-core) nodes are visible
     setHighlight(EMPTY_HL); // calm canvas before the first bloom
+    setRecon(null);
+    setStatements([]);
+    setGrown({ nodes: 0, edges: 0 });
+    setGenStats({ sum: 0, count: 0 });
   }, []);
 
   const exitByb = useCallback(() => {
@@ -295,6 +331,18 @@ export default function GraphView() {
     () => Array.from(new Set(data?.nodes.map((n) => n.kind) ?? [])).sort(),
     [data],
   );
+
+  // Reconstruction-overlay stats.
+  const nodeCount = data?.nodes.length ?? 0;
+  const edgeCount = data?.links.length ?? 0;
+  const avgConf = genStats.count ? genStats.sum / genStats.count : null;
+  const kindCounts = useMemo(() => {
+    const m: Record<string, number> = {};
+    data?.nodes.forEach((n) => {
+      m[n.kind] = (m[n.kind] || 0) + 1;
+    });
+    return m;
+  }, [data]);
 
   // --- "session start" subset: deterministic first-degree neighborhood of the
   // user (Elena) - the user node plus every node directly linked to them, and
@@ -409,16 +457,26 @@ export default function GraphView() {
           </div>
         </div>
 
-        {/* Memory growth toggle (top-right) */}
+        {/* Top-right overlay stack: memory growth + (Build Your Brain) reconstruction. */}
         <div
           style={{
-            ...overlay("top"),
-            left: "auto",
+            position: "absolute",
+            top: 14,
             right: 14,
+            width: 320,
+            display: "flex",
+            flexDirection: "column",
+            gap: 10,
+            maxHeight: "calc(100% - 28px)",
+          }}
+        >
+        <div
+          style={{
+            ...CARD_STYLE,
             display: "flex",
             flexDirection: "column",
             gap: 8,
-            maxWidth: 320,
+            flexShrink: 0,
           }}
         >
           <div
@@ -487,6 +545,175 @@ export default function GraphView() {
           >
             {caption}
           </div>
+        </div>
+
+        {/* Reconstruction overlay (Build Your Brain) — same width as memory
+            growth, docked below it, scrollable so everything fits. */}
+        {byb && (
+          <div
+            className="scroll-ink"
+            style={{
+              ...CARD_STYLE,
+              display: "flex",
+              flexDirection: "column",
+              gap: 10,
+              minHeight: 0,
+              overflowY: "auto",
+            }}
+          >
+            <div>
+              <div style={{ fontSize: 13, fontWeight: 700, color: TEXT }}>Reconstruction</div>
+              <div style={{ fontSize: 11, color: TEXT_MUTED, marginTop: 1 }}>
+                Live as you build your brain.
+              </div>
+            </div>
+
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+              {recon && <Pill label="confidence" value={recon.confidence.toFixed(2)} />}
+              {recon && <Pill label="latency" value={`${recon.latency} ms`} />}
+              <Pill label="answers" value={String(statements.length)} />
+              {avgConf != null && <Pill label="avg conf" value={avgConf.toFixed(2)} />}
+            </div>
+
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "1fr 1fr",
+                gap: "6px 12px",
+                fontSize: 11.5,
+              }}
+            >
+              <Stat label="memories" value={nodeCount} />
+              <Stat label="links" value={edgeCount} />
+              <Stat label="grown" value={`+${grown.nodes}`} accent />
+              <Stat label="new links" value={`+${grown.edges}`} accent />
+            </div>
+
+            {usedKinds.length > 0 && (
+              <div
+                style={{
+                  display: "flex",
+                  flexWrap: "wrap",
+                  gap: "5px 12px",
+                  fontSize: 11,
+                  color: TEXT_MUTED,
+                  paddingTop: 8,
+                  borderTop: `1px solid ${INK_LINE}`,
+                }}
+              >
+                {["contact", "routine", "place", "topic", "preference"]
+                  .filter((k) => kindCounts[k])
+                  .map((k) => (
+                    <span key={k} style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+                      <span
+                        style={{
+                          width: 8,
+                          height: 8,
+                          borderRadius: "50%",
+                          background: KIND_COLORS[k] ?? "#6B7787",
+                        }}
+                      />
+                      {k} <strong style={{ color: TEXT }}>{kindCounts[k]}</strong>
+                    </span>
+                  ))}
+              </div>
+            )}
+
+            {recon && recon.candidates.length > 0 && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                <div
+                  style={{
+                    fontSize: 10.5,
+                    letterSpacing: "0.1em",
+                    textTransform: "uppercase",
+                    color: TEXT_MUTED,
+                    fontWeight: 600,
+                  }}
+                >
+                  Latest options
+                </div>
+                {recon.candidates.map((c, i) => (
+                  <div
+                    key={i}
+                    style={{
+                      border: `1px solid ${INK_LINE}`,
+                      background: INK,
+                      borderRadius: 10,
+                      padding: "8px 10px",
+                    }}
+                  >
+                    <div style={{ fontSize: 13.5, lineHeight: 1.4, color: TEXT }}>{c.text}</div>
+                    <div style={{ fontSize: 10.5, color: TEXT_MUTED, margin: "4px 0 6px" }}>
+                      {c.register} · {c.length_label}
+                    </div>
+                    {(c.grounded_node_ids ?? []).length > 0 && (
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
+                        {(c.grounded_node_ids ?? []).map((id) => (
+                          <span
+                            key={id}
+                            title={id}
+                            style={{
+                              fontSize: 10.5,
+                              padding: "2px 7px",
+                              borderRadius: 999,
+                              background: VOICE_SOFT,
+                              color: VOICE_DEEP,
+                              border: `1px solid ${VOICE}`,
+                            }}
+                          >
+                            {labelById.get(id) ?? id}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {statements.length > 0 && (
+              <div
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 6,
+                  paddingTop: 8,
+                  borderTop: `1px solid ${INK_LINE}`,
+                }}
+              >
+                <div
+                  style={{
+                    fontSize: 10.5,
+                    letterSpacing: "0.1em",
+                    textTransform: "uppercase",
+                    color: TEXT_MUTED,
+                    fontWeight: 600,
+                  }}
+                >
+                  Statements you’ve made
+                </div>
+                {statements
+                  .slice()
+                  .reverse()
+                  .map((s, i) => (
+                    <div
+                      key={i}
+                      style={{ fontSize: 12.5, color: TEXT, lineHeight: 1.4, display: "flex", gap: 6 }}
+                    >
+                      <span style={{ color: MIND, fontWeight: 700 }}>›</span>
+                      <span>{s}</span>
+                    </div>
+                  ))}
+              </div>
+            )}
+
+            {!recon && statements.length === 0 && (
+              <div style={{ fontSize: 12, color: TEXT_MUTED, lineHeight: 1.45 }}>
+                Answer a question to see your reconstruction and watch the graph grow.
+              </div>
+            )}
+          </div>
+        )}
         </div>
 
         {/* Legend (bottom-left) */}
@@ -571,7 +798,12 @@ export default function GraphView() {
             borderLeft: `1px solid ${INK_LINE}`,
           }}
         >
-          <BuildBrainPanel personId={PERSON_ID} onConfirmed={handleConfirmed} onExit={exitByb} />
+          <BuildBrainPanel
+            personId={PERSON_ID}
+            onConfirmed={handleConfirmed}
+            onGenerated={handleGenerated}
+            onExit={exitByb}
+          />
         </div>
       ) : (
       <aside
@@ -740,6 +972,25 @@ function overlay(pos: "top" | "bottom"): CSSProperties {
     border: `1px solid ${INK_LINE}`,
     boxShadow: "0 1px 2px 0 rgba(22,26,33,0.04), 0 10px 24px -14px rgba(22,26,33,0.12)",
   };
+}
+
+function Stat({
+  label,
+  value,
+  accent,
+}: {
+  label: string;
+  value: string | number;
+  accent?: boolean;
+}) {
+  return (
+    <span style={{ display: "inline-flex", alignItems: "baseline", gap: 5 }}>
+      <span style={{ color: TEXT_MUTED }}>{label}</span>
+      <strong style={{ color: accent ? "#075E55" : TEXT, fontVariantNumeric: "tabular-nums" }}>
+        {value}
+      </strong>
+    </span>
+  );
 }
 
 function Pill({ label, value, warn }: { label: string; value: string; warn?: boolean }) {
