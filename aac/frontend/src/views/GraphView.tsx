@@ -15,7 +15,9 @@ import {
   type Growth,
 } from "../components/ForceGraph";
 import HologramBrain from "../components/HologramBrain";
+import BuildBrainPanel from "../components/BuildBrainPanel";
 import { getGraph, generate } from "../lib/api";
+import type { ConfirmResponse } from "../lib/api";
 import { DUR, EASE_OUT } from "../lib/motion";
 
 const PERSON_ID = "elena";
@@ -85,6 +87,13 @@ export default function GraphView() {
   const [dims, setDims] = useState({ w: 0, h: 0 });
   const [triggering, setTriggering] = useState<string | null>(null);
 
+  // Build Your Brain mode: an interview that grows the graph live. While active,
+  // the trace poller is paused so confirmation "blooms" own the highlight.
+  const [byb, setByb] = useState(false);
+  const bybRef = useRef(false);
+  bybRef.current = byb;
+  const bloomTimer = useRef<number | null>(null);
+
   // Memory growth: "after" = full current graph; "start" = sparse first-degree
   // subset. `t` (0 -> 1) is animated by rAF and interpolates the rendered data.
   const [mode, setMode] = useState<"start" | "after">("after");
@@ -147,6 +156,8 @@ export default function GraphView() {
   useEffect(() => {
     let alive = true;
     const tick = async () => {
+      // Paused during Build Your Brain so confirmation blooms own the highlight.
+      if (bybRef.current) return;
       try {
         const res = await fetch("/api/trace/latest");
         const trace = (await res.json()) as Trace;
@@ -208,6 +219,74 @@ export default function GraphView() {
       } finally {
         setTriggering(null);
       }
+    },
+    [],
+  );
+
+  // --- Build Your Brain: grow the graph from a confirmed answer ---
+  // Insert created nodes/edges at their deterministic positions (no relayout, no
+  // refetch — existing nodes keep their exact spots) and drive a transient bloom
+  // via the existing highlight machinery: new nodes flare (grounded), new +
+  // reinforced edges fire, reinforced nodes glow. Clears after a few seconds.
+  const handleConfirmed = useCallback((result: ConfirmResponse) => {
+    const newNodeIds = (result.new_nodes ?? []).map((n) => n.id);
+    const newEdgeIds = (result.new_edges ?? []).map(
+      (e) => `${e.source}|${e.type}|${e.target}`,
+    );
+
+    setData((prev) => {
+      if (!prev) return prev;
+      const haveN = new Set(prev.nodes.map((n) => n.id));
+      const haveL = new Set(prev.links.map((l) => l.id));
+      const addNodes: FGNode[] = (result.new_nodes ?? [])
+        .filter((n) => !haveN.has(n.id))
+        .map((n) => ({ id: n.id, kind: n.kind, label: n.label, salience: n.salience }));
+      const willHave = new Set<string>([...haveN, ...addNodes.map((n) => n.id)]);
+      const addLinks: FGLink[] = (result.new_edges ?? [])
+        .map((e) => ({
+          id: `${e.source}|${e.type}|${e.target}`,
+          source: e.source,
+          target: e.target,
+          type: e.type,
+          weight: e.weight,
+          term: "",
+        }))
+        .filter(
+          (l) =>
+            !haveL.has(l.id) &&
+            willHave.has(l.source as string) &&
+            willHave.has(l.target as string),
+        );
+      if (!addNodes.length && !addLinks.length) return prev;
+      return { nodes: [...prev.nodes, ...addNodes], links: [...prev.links, ...addLinks] };
+    });
+
+    setHighlight({
+      active: true,
+      anchorIds: new Set(),
+      subgraphNodeIds: new Set<string>([...newNodeIds, ...(result.changed_node_ids ?? [])]),
+      subgraphEdgeIds: new Set<string>([...newEdgeIds, ...(result.changed_edge_ids ?? [])]),
+      groundedIds: new Set<string>(newNodeIds),
+    });
+    if (bloomTimer.current != null) window.clearTimeout(bloomTimer.current);
+    bloomTimer.current = window.setTimeout(() => setHighlight(EMPTY_HL), 4200);
+  }, []);
+
+  const enterByb = useCallback(() => {
+    setByb(true);
+    setMode("after"); // ensure newly-grown (non-core) nodes are visible
+    setHighlight(EMPTY_HL); // calm canvas before the first bloom
+  }, []);
+
+  const exitByb = useCallback(() => {
+    setByb(false);
+    if (bloomTimer.current != null) window.clearTimeout(bloomTimer.current);
+    setHighlight(EMPTY_HL);
+  }, []);
+
+  useEffect(
+    () => () => {
+      if (bloomTimer.current != null) window.clearTimeout(bloomTimer.current);
     },
     [],
   );
@@ -280,7 +359,8 @@ export default function GraphView() {
       : `Session start: ${startCount} memories.`;
 
   return (
-    <div style={{ display: "flex", height: "100%", background: INK, color: TEXT }}>
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", background: INK, color: TEXT }}>
+      <div style={{ display: "flex", flex: 1, minHeight: 0 }}>
       {/* Graph canvas — dark viewport so the hologram brain glows (bloom). */}
       <div
         ref={containerRef}
@@ -492,6 +572,30 @@ export default function GraphView() {
           overflowY: "auto",
         }}
       >
+        <button
+          type="button"
+          onClick={enterByb}
+          disabled={byb}
+          style={{
+            width: "100%",
+            display: "inline-flex",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: 8,
+            padding: "11px 14px",
+            marginBottom: 16,
+            borderRadius: 10,
+            border: `1px solid ${byb ? MIND : "rgba(12,130,118,0.45)"}`,
+            background: byb ? MIND_SOFT : MIND,
+            color: byb ? "#075E55" : "#FFFFFF",
+            fontSize: 14,
+            fontWeight: 600,
+            cursor: byb ? "default" : "pointer",
+          }}
+        >
+          ✦ {byb ? "Building your brain…" : "Build your brain"}
+        </button>
+
         <h2 style={{ margin: "0 0 4px", fontSize: 18, color: TEXT }}>Reconstruction</h2>
         <p style={{ margin: "0 0 14px", fontSize: 12.5, color: TEXT_MUTED, lineHeight: 1.5 }}>
           The candidates from the latest <code>/generate</code>, grounded in the lit-up nodes.
@@ -582,6 +686,20 @@ export default function GraphView() {
           ))}
         </div>
       </aside>
+      </div>
+
+      {/* Build Your Brain dock (below the graph; the graph stays the canvas). */}
+      {byb && (
+        <div
+          style={{
+            height: "clamp(300px, 40vh, 440px)",
+            flexShrink: 0,
+            borderTop: `1px solid ${INK_LINE}`,
+          }}
+        >
+          <BuildBrainPanel personId={PERSON_ID} onConfirmed={handleConfirmed} onExit={exitByb} />
+        </div>
+      )}
     </div>
   );
 }

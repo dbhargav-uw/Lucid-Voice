@@ -63,9 +63,43 @@ export interface ConfirmRequest {
   partner?: string;
 }
 
+// Elements CREATED by a confirmation (for live incremental graph growth).
+export interface NewNode {
+  id: string;
+  kind: string;
+  label: string;
+  salience: number;
+}
+
+export interface NewEdge {
+  source: string;
+  target: string;
+  type: string;
+  weight: number;
+}
+
 export interface ConfirmResponse {
   changed_node_ids: string[];
   changed_edge_ids: string[];
+  // Additive (optional): elements created this turn so the graph can bloom them.
+  new_nodes?: NewNode[];
+  new_edges?: NewEdge[];
+}
+
+// --- /assistant_turn (Build Your Brain) ---
+
+export interface AssistantTurnMessage {
+  role: "assistant" | "user";
+  text: string;
+}
+
+export interface AssistantTurnRequest {
+  person_id: string;
+  history: AssistantTurnMessage[];
+}
+
+export interface AssistantTurnResponse {
+  text: string;
 }
 
 export interface ConsolidateRequest {
@@ -190,6 +224,12 @@ export function consolidate(
   req: ConsolidateRequest,
 ): Promise<ConsolidateResponse> {
   return post<ConsolidateRequest, ConsolidateResponse>("/consolidate", req);
+}
+
+export function assistantTurn(
+  req: AssistantTurnRequest,
+): Promise<AssistantTurnResponse> {
+  return post<AssistantTurnRequest, AssistantTurnResponse>("/assistant_turn", req);
 }
 
 export function stt(req: STTRequest): Promise<STTResponse> {
