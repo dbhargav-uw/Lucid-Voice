@@ -52,6 +52,11 @@ class LMStudioProvider(LLMProvider):
         self.base_url: str = settings.lm_studio_base_url.rstrip("/")
         self.model: str = getattr(settings, "lm_studio_model", "local-model")
         self.timeout: float = float(getattr(settings, "llm_timeout", 120.0))
+        # Reasoning control (see config). "none" disables Gemma-4's chain-of-thought.
+        self.reasoning_effort: str = str(
+            getattr(settings, "lm_studio_reasoning_effort", "none") or ""
+        ).strip()
+        self.max_tokens: int = int(getattr(settings, "lm_studio_max_tokens", 0) or 0)
 
     def _messages(self, prompt: str, system: str | None) -> list[dict]:
         messages: list[dict] = []
@@ -60,29 +65,34 @@ class LMStudioProvider(LLMProvider):
         messages.append({"role": "user", "content": prompt})
         return messages
 
-    def generate(self, prompt: str, system: str | None = None) -> str:
-        payload = {
+    def _payload(self, prompt: str, system: str | None, **extra) -> dict:
+        payload: dict = {
             "model": self.model,
             "messages": self._messages(prompt, system),
             "temperature": 0.7,
             "stream": False,
         }
+        # reasoning_effort: "none" makes Gemma-4 skip thinking entirely (huge
+        # latency win); omit when blank/"default" so non-reasoning models are
+        # unaffected.
+        if self.reasoning_effort and self.reasoning_effort.lower() != "default":
+            payload["reasoning_effort"] = self.reasoning_effort
+        if self.max_tokens > 0:
+            payload["max_tokens"] = self.max_tokens
+        payload.update(extra)
+        return payload
+
+    def generate(self, prompt: str, system: str | None = None) -> str:
         url = f"{self.base_url}/chat/completions"
         with httpx.Client(timeout=self.timeout) as client:
-            resp = client.post(url, json=payload)
+            resp = client.post(url, json=self._payload(prompt, system))
             resp.raise_for_status()
             data = resp.json()
         return data["choices"][0]["message"]["content"]
 
     def generate_json(self, prompt: str, system: str | None = None) -> dict:
-        payload = {
-            "model": self.model,
-            "messages": self._messages(prompt, system),
-            "temperature": 0.7,
-            "stream": False,
-            "response_format": {"type": "json_object"},
-        }
         url = f"{self.base_url}/chat/completions"
+        payload = self._payload(prompt, system, response_format={"type": "json_object"})
         with httpx.Client(timeout=self.timeout) as client:
             resp = client.post(url, json=payload)
             resp.raise_for_status()

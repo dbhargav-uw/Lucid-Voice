@@ -26,6 +26,15 @@ class Settings(BaseSettings):
     lm_studio_base_url: str = "http://localhost:1234/v1"
     lm_studio_model: str = "local-model"
     lm_studio_api_key: str = "not-needed"
+    llm_timeout: float = 120.0
+    # Reasoning control. Gemma-4 ignores the Qwen-style enable_thinking/no_think
+    # flags but honors OpenAI's reasoning_effort: "none" fully disables its
+    # chain-of-thought (~24s -> ~3s per call with valid output). Set to "low"/
+    # "medium"/"high" to trade latency for more deliberation, or "" to omit.
+    lm_studio_reasoning_effort: str = "none"
+    # Optional hard cap on generated tokens (0 = omit). With reasoning off the
+    # answer is small; a cap is a backstop, not the primary lever.
+    lm_studio_max_tokens: int = 0
 
     # --- Cloud (opt-in) ---
     claude_model: str = "claude-sonnet-4-6"
