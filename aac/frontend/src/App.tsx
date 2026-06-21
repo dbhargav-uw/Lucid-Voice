@@ -4,6 +4,7 @@ import { CaretDown } from "@phosphor-icons/react";
 import ConversationView from "./views/ConversationView";
 import GraphView from "./views/GraphView";
 import { DUR, EASE_OUT } from "./lib/motion";
+import logoMark from "./assets/logo-mark.png";
 
 const NAV_ITEMS = [
   { to: "/", label: "Conversation", end: true },
@@ -13,28 +14,22 @@ const NAV_ITEMS = [
 function TopBar() {
   return (
     <header className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-ink-line bg-ink px-4 py-2.5 sm:px-6">
-      {/* Wordmark — the voice-orb mark + "Lucid" (Geist) · "Voice" (Newsreader
-          serif, the human-utterance type), matching assets/logo-lockup.svg. */}
-      <div className="flex items-center gap-2" aria-label="Lucid Voice">
-        <svg
+      {/* Brand — the Lucid Voice head mark (assets/logo-mark.png) + wordmark. */}
+      <div className="flex items-center gap-2.5" aria-label="Lucid Voice">
+        <img
+          src={logoMark}
+          alt=""
           aria-hidden
-          viewBox="0 0 100 100"
-          className="h-7 w-7 shrink-0 sm:h-8 sm:w-8"
+          className="h-8 w-auto shrink-0 sm:h-9"
+        />
+        <span
+          className="whitespace-nowrap leading-none tracking-[-0.01em]"
+          style={{ fontFamily: '"Quicksand", ui-sans-serif, system-ui, sans-serif' }}
         >
-          <circle cx="50" cy="50" r="46" fill="#E14826" />
-          <g fill="#FFFFFF">
-            <rect x="22" y="38" width="8" height="24" rx="4" />
-            <rect x="34" y="30" width="8" height="40" rx="4" />
-            <rect x="46" y="22" width="8" height="56" rx="4" />
-            <rect x="58" y="30" width="8" height="40" rx="4" />
-            <rect x="70" y="38" width="8" height="24" rx="4" />
-          </g>
-        </svg>
-        <span className="whitespace-nowrap leading-none tracking-[-0.02em]">
-          <span className="font-ui text-[1.35rem] font-bold text-text sm:text-[1.5rem]">
+          <span className="text-[1.35rem] font-bold text-[#0E3A42] sm:text-[1.5rem]">
             Lucid
           </span>
-          <span className="ml-[0.18em] font-utter text-[1.35rem] font-medium text-voice sm:text-[1.5rem]">
+          <span className="ml-[0.2em] text-[1.35rem] font-bold text-voice sm:text-[1.5rem]">
             Voice
           </span>
         </span>
