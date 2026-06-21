@@ -29,6 +29,19 @@ from app.config import settings
 SALIENCE_BUMP = 0.5
 RECENT_EVENTS = 12  # how many recent events consolidate reads
 
+# System role for the Build-Your-Brain interviewer (assistant_turn).
+_ASSISTANT_SYSTEM = (
+    "You are a warm, patient assistant getting to know a person so you can later "
+    "help them communicate in their own voice. You are gently interviewing them "
+    "about their life. Ask ONE short, friendly question at a time, building "
+    "naturally on what they have already told you. Focus on things worth "
+    "remembering: the important people in their life and what they call them, "
+    "their daily routines, the places they go, and the things they like and care "
+    "about. Prefer the topics the notes say are missing. Never ask more than one "
+    "question at once, and do not explain yourself or add commentary — reply with "
+    "just the next question, one or two warm sentences."
+)
+
 # Mentions only link to these "real" entity kinds (not events/phrases).
 ENTITY_KINDS = {"user", "contact", "place", "topic", "routine", "preference", "need"}
 
@@ -39,6 +52,28 @@ _STOPWORDS = {
     "me", "my", "of", "is", "so", "but", "not", "that", "this", "a", "an", "we",
     "she", "he", "they", "them", "his", "her", "our", "us", "be", "am", "was",
     "were", "in", "on", "at", "as", "if", "or", "let", "get", "got", "come",
+}
+
+# Lightweight, offline kind classification for entities CREATED during a
+# confirmation, so Build-Your-Brain answers populate the RIGHT node kinds
+# (people as contacts, days/times as routines, places as places) instead of
+# everything defaulting to "topic". Keeps the interviewer's gap analysis honest.
+_DAY_TIME_WORDS = {
+    "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday",
+    "weekday", "weekdays", "weekend", "weekends", "daily", "weekly", "morning",
+    "mornings", "afternoon", "afternoons", "evening", "evenings", "night",
+    "nights", "noon", "midday", "breakfast", "lunch", "dinner", "bedtime",
+}
+_PLACE_WORDS = {
+    "park", "church", "temple", "mosque", "garden", "store", "shop", "market",
+    "mall", "hospital", "clinic", "kitchen", "beach", "school", "library", "cafe",
+    "restaurant", "home", "house", "office", "gym", "studio", "farm", "porch",
+}
+_REL_WORDS = {
+    "mom", "mum", "mommy", "dad", "daddy", "mother", "father", "sister", "brother",
+    "daughter", "son", "wife", "husband", "friend", "aunt", "uncle", "grandson",
+    "granddaughter", "grandmother", "grandfather", "grandma", "grandpa", "cousin",
+    "neighbor", "neighbour", "nurse", "doctor", "partner", "caregiver",
 }
 
 
@@ -95,6 +130,27 @@ class LearningService:
         """The phrasing to remember — the trimmed, whitespace-collapsed sentence."""
         return re.sub(r"\s+", " ", (text or "").strip())
 
+    @staticmethod
+    def _named_people(text: str) -> set[str]:
+        """Proper names that follow a relationship word, e.g. 'sister Maria' -> {maria}."""
+        rels = "|".join(sorted(_REL_WORDS, key=len, reverse=True))
+        out: set[str] = set()
+        for mobj in re.finditer(rf"\b(?:{rels})\s+([A-Z][a-zA-Z]+)", text or ""):
+            out.add(mobj.group(1).lower())
+        return out
+
+    @staticmethod
+    def _classify_kind(mention: str, named_people: set[str]) -> str:
+        """Best-effort node kind for a newly-created entity (default: topic)."""
+        m = mention.strip().lower()
+        if m in _DAY_TIME_WORDS:
+            return "routine"
+        if m in _PLACE_WORDS:
+            return "place"
+        if m in _REL_WORDS or m in named_people:
+            return "contact"
+        return "topic"
+
     # --- /confirm -----------------------------------------------------------
 
     def on_confirm(
@@ -107,6 +163,9 @@ class LearningService:
     ) -> dict[str, list[str]]:
         retr = self._retrieval()
         pnodes, embs, user_id, pedges = self._person_state(person_id)
+        # Snapshot BEFORE any mutation so we can split created vs reinforced below.
+        before_node_ids = set(pnodes.keys())
+        before_edge_ids = {e["id"] for e in pedges}
         # Candidate set for entity-linking excludes events/phrases.
         link_nodes = {nid: nd for nid, nd in pnodes.items() if nd["kind"] in ENTITY_KINDS}
         link_embs = {nid: embs[nid] for nid in link_nodes}
@@ -135,6 +194,9 @@ class LearningService:
                 mention_embs = {}
 
         entity_ids: list[str] = []
+        # Proper names that follow a relationship word (e.g. "sister Maria") so a
+        # freshly-mentioned person is created as a contact, not a topic.
+        named_people = self._named_people(text)
 
         def add_entity(nid: str) -> None:
             if nid not in entity_ids:
@@ -145,12 +207,13 @@ class LearningService:
             m_emb = mention_embs.get(m)
             nid = retr._match_mention(m, link_nodes, link_embs, m_emb)
             if nid is None:
-                # Create a new entity node (default kind: topic).
+                # Create a new entity node, classifying its kind from the mention.
+                kind = self._classify_kind(m, named_people)
                 nid = f"{person_id}:c_{_slug(m)}"
                 emb_list = m_emb.tolist() if m_emb is not None else self._embed(m)
-                self.graph.upsert_node(kind="topic", id=nid, label=m, salience=1.0,
+                self.graph.upsert_node(kind=kind, id=nid, label=m, salience=1.0,
                                        embedding=emb_list, last_seen=now)
-                nd = {"id": nid, "kind": "topic", "label": m, "salience": 1.0,
+                nd = {"id": nid, "kind": kind, "label": m, "salience": 1.0,
                       "last_seen": now, "embedding": emb_list}
                 pnodes[nid] = nd
                 link_nodes[nid] = nd
@@ -227,10 +290,146 @@ class LearningService:
         if phrase_id:
             changed_edges.add(self.graph.reinforce_edge("mentions", event_id, phrase_id))
 
+        # --- 5) split created vs reinforced by diffing against the snapshot ---
+        # Re-read the person's graph and report nodes/edges whose ids are new this
+        # turn (with full metadata for the frontend to insert + bloom), leaving
+        # changed_* to mean "pre-existing element that was reinforced" (pulse).
+        after_nodes = self.graph.person_nodes(person_id)
+        after_edges = self.graph.person_edges(person_id)
+        new_nodes = [
+            {
+                "id": n["id"],
+                "kind": n["kind"],
+                "label": n["label"],
+                "salience": float(n["salience"]) if n.get("salience") is not None else 1.0,
+            }
+            for n in after_nodes
+            if n["id"] not in before_node_ids
+        ]
+        new_edges = [
+            {
+                "source": e["source"],
+                "target": e["target"],
+                "type": e["type"],
+                "weight": float(e["weight"]) if e.get("weight") is not None else 1.0,
+            }
+            for e in after_edges
+            if e["id"] not in before_edge_ids
+        ]
+        new_node_id_set = {n["id"] for n in new_nodes}
+        new_edge_id_set = {e["id"] for e in after_edges if e["id"] not in before_edge_ids}
+
         return {
-            "changed_node_ids": sorted(changed_nodes),
-            "changed_edge_ids": sorted(changed_edges),
+            "changed_node_ids": sorted(changed_nodes - new_node_id_set),
+            "changed_edge_ids": sorted(changed_edges - new_edge_id_set),
+            "new_nodes": new_nodes,
+            "new_edges": new_edges,
         }
+
+    # --- /assistant_turn (Build Your Brain interviewer) ---------------------
+
+    # Kinds the interview tries to populate (excludes user/event/phrase).
+    _INTERVIEW_KINDS = ("contact", "routine", "place", "topic", "preference", "need")
+    _KIND_LABEL = {
+        "contact": "people",
+        "routine": "routines",
+        "place": "places",
+        "topic": "interests",
+        "preference": "preferences",
+        "need": "needs",
+    }
+    _FALLBACK_QUESTIONS = (
+        "Who are the most important people in your life?",
+        "What does a normal day look like for you?",
+        "Where do you spend most of your time?",
+        "What do you most enjoy doing?",
+        "Is there anything you often need help with?",
+    )
+
+    def _graph_summary(self, person_id: str) -> str:
+        """A brief plain-language summary of what the graph holds + where it's thin,
+        so the interviewer asks about gaps ('it asks what it doesn't know')."""
+        nodes = self.graph.person_nodes(person_id)
+        edges = self.graph.person_edges(person_id)
+        by_kind: dict[str, list[str]] = {}
+        for n in nodes:
+            by_kind.setdefault(n["kind"], []).append(str(n["label"]))
+        node_by_id = {n["id"]: n for n in nodes}
+
+        # Which contacts have a recorded term of address (addresses_as edge).
+        contacts_with_term: set[str] = set()
+        for e in edges:
+            if e["type"] == "addresses_as" and (e.get("term") or "").strip():
+                for endpoint in (e["source"], e["target"]):
+                    nd = node_by_id.get(endpoint)
+                    if nd and nd["kind"] == "contact":
+                        contacts_with_term.add(endpoint)
+
+        lines: list[str] = []
+        for kind in self._INTERVIEW_KINDS:
+            labels = by_kind.get(kind, [])
+            shown = ", ".join(labels[:8]) if labels else "none yet"
+            lines.append(f"- {self._KIND_LABEL[kind]} ({len(labels)}): {shown}")
+
+        missing_term = [
+            str(n["label"])
+            for n in nodes
+            if n["kind"] == "contact" and n["id"] not in contacts_with_term
+        ]
+        if missing_term:
+            lines.append("- I don't know how they address: " + ", ".join(missing_term[:8]))
+
+        gaps = [self._KIND_LABEL[k] for k in self._INTERVIEW_KINDS if not by_kind.get(k)]
+        if gaps:
+            lines.append("- Biggest gaps (ask about these first): " + ", ".join(gaps))
+        return "\n".join(lines)
+
+    @staticmethod
+    def _clean_question(raw: str) -> str:
+        """Reduce a model reply to a single clean question line."""
+        if not raw:
+            return ""
+        text = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL | re.IGNORECASE)
+        text = text.strip().strip("`").strip()
+        # Drop a leading "Assistant:"/"Question:" label if present.
+        text = re.sub(r"^\s*(assistant|question)\s*:\s*", "", text, flags=re.IGNORECASE)
+        # First non-empty line is the question.
+        for line in text.splitlines():
+            line = line.strip().strip('"').strip()
+            if line:
+                return line
+        return ""
+
+    def interview_question(self, person_id: str, history: list[dict[str, str]]) -> str:
+        """Return the next warm, graph-aware interview question (one at a time).
+
+        Graph-aware: the model sees a summary of what's already known + the gaps,
+        and is told to ask about what's missing. Degrades to a rotating fallback
+        question if the LLM is unavailable (offline-safe).
+        """
+        summary = self._graph_summary(person_id)
+        convo_lines = [
+            f"{'You' if m.get('role') == 'assistant' else 'Them'}: {m.get('text', '')}"
+            for m in (history or [])[-12:]
+            if m.get("text")
+        ]
+        convo = "\n".join(convo_lines)
+        user = (
+            "What I already know about this person:\n"
+            f"{summary}\n\n"
+            + (f"Conversation so far:\n{convo}\n\n" if convo else "This is the very first question.\n\n")
+            + "Ask the single next question to learn something I don't already know "
+            "(prefer the gaps above). Build on what they just said. Reply with ONLY "
+            "the question."
+        )
+        try:
+            raw = self.llm.generate(user, system=_ASSISTANT_SYSTEM)
+        except Exception:
+            raw = ""
+        q = self._clean_question(raw)
+        if q:
+            return q
+        return self._FALLBACK_QUESTIONS[len(history or []) % len(self._FALLBACK_QUESTIONS)]
 
     # --- phrase mining (corpus helper) -------------------------------------
 

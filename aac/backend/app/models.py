@@ -122,11 +122,34 @@ class ConfirmRequest(BaseModel):
     partner: Optional[str] = None
 
 
+class NewNode(BaseModel):
+    """A node CREATED by a confirmation (for live incremental graph growth)."""
+
+    id: str
+    kind: str
+    label: str
+    salience: float = 1.0
+
+
+class NewEdge(BaseModel):
+    """An edge CREATED by a confirmation (for live incremental graph growth)."""
+
+    source: str
+    target: str
+    type: str
+    weight: float = 1.0
+
+
 class ConfirmResponse(BaseModel):
+    # Existing elements that were REINFORCED this turn (frontend pulses them).
     changed_node_ids: list[str] = Field(default_factory=list)
     changed_edge_ids: list[str] = Field(default_factory=list)
     # Additive: the updated learned style summary after this confirmation.
     style: Optional[StyleProfile] = None
+    # Additive: elements CREATED this turn so the frontend can insert + bloom them
+    # without re-fetching/relaying out the whole graph.
+    new_nodes: list[NewNode] = Field(default_factory=list)
+    new_edges: list[NewEdge] = Field(default_factory=list)
 
 
 # --- /consolidate -----------------------------------------------------------
@@ -139,6 +162,25 @@ class ConsolidateRequest(BaseModel):
 class ConsolidateResponse(BaseModel):
     new_node_ids: list[str] = Field(default_factory=list)
     new_edge_ids: list[str] = Field(default_factory=list)
+
+
+# --- /assistant_turn (Build Your Brain) -------------------------------------
+
+
+class AssistantTurnMessage(BaseModel):
+    """One turn in the Build-Your-Brain interview transcript."""
+
+    role: Literal["assistant", "user"]
+    text: str
+
+
+class AssistantTurnRequest(BaseModel):
+    person_id: str
+    history: list[AssistantTurnMessage] = Field(default_factory=list)
+
+
+class AssistantTurnResponse(BaseModel):
+    text: str
 
 
 # --- /stt -------------------------------------------------------------------

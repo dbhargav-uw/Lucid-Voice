@@ -18,6 +18,8 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
 from app.models import (
+    AssistantTurnRequest,
+    AssistantTurnResponse,
     ConfirmRequest,
     ConfirmResponse,
     ConsolidateRequest,
@@ -347,7 +349,7 @@ def confirm(req: ConfirmRequest) -> ConfirmResponse:
         )
     except Exception as exc:  # pragma: no cover - defensive
         logger.error("confirm(%r) failed: %s", req.person_id, exc)
-        result = {"changed_node_ids": [], "changed_edge_ids": []}
+        result = {"changed_node_ids": [], "changed_edge_ids": [], "new_nodes": [], "new_edges": []}
 
     # Implicit-feedback style update: contrast the chosen utterance against the
     # rejected alternatives from the last /generate (carried in latest_trace).
@@ -364,7 +366,30 @@ def confirm(req: ConfirmRequest) -> ConfirmResponse:
         changed_node_ids=result["changed_node_ids"],
         changed_edge_ids=result["changed_edge_ids"],
         style=style,
+        new_nodes=result.get("new_nodes", []),
+        new_edges=result.get("new_edges", []),
     )
+
+
+@app.post("/assistant_turn", response_model=AssistantTurnResponse)
+def assistant_turn(req: AssistantTurnRequest) -> AssistantTurnResponse:
+    """Build Your Brain: return the assistant's next interview question.
+
+    One graph-aware LLM call (thinking disabled like the others). The assistant
+    sees a summary of what the graph already holds and where it is thin, and asks
+    one warm question targeting a gap. Degrades to a fallback question offline.
+    """
+    learning = get_learning_service()
+    fallback = "Tell me about the people who matter most to you."
+    if learning is None:
+        return AssistantTurnResponse(text=fallback)
+    try:
+        history = [{"role": m.role, "text": m.text} for m in req.history]
+        text = learning.interview_question(req.person_id, history)
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.error("assistant_turn(%r) failed: %s", req.person_id, exc)
+        text = fallback
+    return AssistantTurnResponse(text=text or fallback)
 
 
 @app.post("/consolidate", response_model=ConsolidateResponse)
