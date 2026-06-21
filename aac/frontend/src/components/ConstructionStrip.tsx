@@ -20,10 +20,10 @@ export default function ConstructionStrip({
   const empty = fragments.length === 0;
 
   return (
-    <div className="flex min-h-[72px] items-center gap-3 rounded-lg border border-ink-line bg-ink-raised px-4 py-3 shadow-card">
+    <div className="flex min-h-[64px] items-center gap-3 rounded-lg border border-ink-line bg-ink-raised px-4 py-3 shadow-card">
       <div className="flex flex-1 flex-wrap items-center gap-2">
         {empty ? (
-          <span className="text-aac-base text-text-muted">Tap words to begin.</span>
+          <span className="text-aac-base text-text-faint">Tap words to begin.</span>
         ) : (
           <AnimatePresence initial={false}>
             {fragments.map((fragment, i) => (
@@ -34,14 +34,14 @@ export default function ConstructionStrip({
                 animate={{ opacity: 1, y: 0, scale: 1 }}
                 exit={{ opacity: 0, scale: 0.92 }}
                 transition={{ duration: DUR.base, ease: EASE_OUT }}
-                className="inline-flex items-center gap-1 rounded-full border border-voice/30 bg-voice-soft py-1.5 pl-4 pr-2 text-aac-base font-medium text-text"
+                className="inline-flex items-center gap-1.5 rounded-full border border-voice/30 bg-voice-soft py-2 pl-4 pr-1.5 text-aac-base font-medium text-text"
               >
                 {fragment}
                 <button
                   type="button"
                   onClick={() => onRemove(i)}
                   aria-label={`Remove ${fragment}`}
-                  className="grid h-7 w-7 place-items-center rounded-full text-text-muted transition-colors duration-150 hover:bg-text/10 hover:text-text"
+                  className="grid h-9 w-9 place-items-center rounded-full text-text-muted transition-colors duration-fast hover:bg-text/10 hover:text-text"
                 >
                   <X size={14} weight="bold" aria-hidden />
                 </button>
@@ -55,7 +55,7 @@ export default function ConstructionStrip({
         type="button"
         onClick={onClear}
         disabled={empty}
-        className="inline-flex min-h-touch items-center gap-1.5 rounded-md px-3 font-mono text-[0.74rem] uppercase tracking-[0.12em] text-text-muted transition-colors duration-150 enabled:hover:text-text disabled:cursor-default disabled:opacity-30"
+        className="inline-flex items-center gap-1.5 rounded-md px-3 py-2 font-mono text-[0.78rem] uppercase tracking-[0.12em] text-text-muted transition-colors duration-fast enabled:hover:text-text disabled:cursor-default disabled:opacity-30"
       >
         <X size={13} weight="bold" aria-hidden />
         Clear

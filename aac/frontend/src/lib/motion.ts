@@ -4,6 +4,7 @@
 // 150–250ms product range except the deliberate bloom.
 
 export const EASE_OUT = [0.16, 1, 0.3, 1] as const; // ease-out-expo
+export const EASE_OUT_QUART = [0.25, 1, 0.5, 1] as const; // softer ease-out (UI states)
 
 // Low-bounce spring for the speak moment only.
 export const SPRING = {

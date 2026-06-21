@@ -46,7 +46,7 @@ export default function CandidateCard({
       initial={reduce ? { opacity: 0 } : { opacity: 0, y: 12, filter: "blur(6px)" }}
       animate={{
         opacity: rejected ? 0.4 : 1,
-        y: selected ? -2 : 0,
+        y: selected ? -5 : 0,
         scale: rejected ? 0.975 : 1,
         filter: rejected ? "saturate(0.45) blur(0px)" : "saturate(1) blur(0px)",
       }}
@@ -56,7 +56,7 @@ export default function CandidateCard({
           : { delay: reduce ? 0 : index * 0.07, duration: DUR.moment, ease: EASE_OUT }
       }
       className={[
-        "relative flex flex-col gap-4 rounded-xl border p-6 transition-colors duration-300",
+        "relative flex flex-col gap-4 rounded-xl border p-6 transition-colors duration-base",
         selected
           ? "border-voice/55 bg-voice-soft shadow-utter"
           : "border-ink-line bg-ink-raised shadow-card",
@@ -66,14 +66,16 @@ export default function CandidateCard({
         {candidate.text}
       </p>
 
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="inline-flex items-center gap-2 rounded-full border border-ink-line bg-ink-sunken px-3 py-1">
+      {/* Metadata cluster: register pill (dot + label) leads; length is quieter
+          plain metadata so it doesn't read as a broken dotless register pill. */}
+      <div className="-mt-1.5 flex flex-wrap items-center gap-2.5">
+        <span className="inline-flex items-center gap-2 rounded-full border border-ink-line bg-ink-raised px-3 py-1">
           <span aria-hidden className={`h-1.5 w-1.5 rounded-full ${reg.dot}`} />
-          <span className={`font-mono text-[0.7rem] uppercase tracking-[0.12em] ${reg.text}`}>
+          <span className={`font-mono text-[0.72rem] uppercase tracking-[0.12em] ${reg.text}`}>
             {candidate.register}
           </span>
         </span>
-        <span className="rounded-full border border-ink-line bg-ink-sunken px-3 py-1 font-mono text-[0.7rem] uppercase tracking-[0.12em] text-text-muted">
+        <span className="font-mono text-[0.72rem] uppercase tracking-[0.12em] text-text-muted">
           {candidate.length_label}
         </span>
       </div>
@@ -89,12 +91,24 @@ export default function CandidateCard({
           type="button"
           whileTap={reduce ? undefined : { scale: 0.97 }}
           onClick={() => onSay(candidate)}
-          className="inline-flex min-h-cta items-center gap-2.5 rounded-md bg-voice px-6 font-ui text-[1.05rem] font-semibold text-on-voice transition-colors duration-200 hover:bg-voice-deep"
+          className="btn-cta rounded-md bg-voice font-ui text-[1.05rem] font-semibold text-on-voice transition-colors duration-base hover:bg-voice-deep"
         >
           <SpeakerHigh size={20} weight="fill" aria-hidden />
           Say this
         </motion.button>
-        {playing && <Waveform playing />}
+        {/* Speaking affordance — slot is ALWAYS reserved (opacity toggles) so the
+            row never shifts width when playback starts. */}
+        <span
+          aria-hidden
+          className={`ml-auto inline-flex items-center gap-2 transition-opacity duration-base ${
+            playing ? "opacity-100" : "opacity-0"
+          }`}
+        >
+          <Waveform playing={playing} size="sm" />
+          <span className="font-mono text-[0.72rem] uppercase tracking-[0.12em] text-voice-deep">
+            Speaking
+          </span>
+        </span>
       </div>
     </motion.div>
   );

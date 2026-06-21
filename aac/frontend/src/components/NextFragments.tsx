@@ -5,7 +5,7 @@
 // (AnimatePresence) as fragments change.
 
 import { AnimatePresence, motion } from "framer-motion";
-import { Lightning, Plus } from "@phosphor-icons/react";
+import { Lightning } from "@phosphor-icons/react";
 import { DUR, EASE_OUT } from "../lib/motion";
 import type { VocabTile } from "./VocabBoard";
 
@@ -46,8 +46,8 @@ export default function NextFragments({ fragments, onSuggest }: NextFragmentsPro
   const groupKey = suggestions.join("|");
 
   return (
-    <div className="flex flex-wrap items-center gap-2">
-      <span className="inline-flex items-center gap-1.5 font-mono text-[0.7rem] uppercase tracking-[0.12em] text-text-faint">
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+      <span className="eyebrow inline-flex items-center gap-1.5">
         <Lightning size={12} weight="fill" aria-hidden className="text-mind" />
         Next
       </span>
@@ -65,9 +65,8 @@ export default function NextFragments({ fragments, onSuggest }: NextFragmentsPro
               transition={{ duration: DUR.fast, ease: EASE_OUT, delay: i * 0.03 }}
               whileTap={{ scale: 0.96 }}
               onClick={() => onSuggest({ id: `next-${word}`, label: word })}
-              className="inline-flex min-h-touch items-center gap-1 rounded-full border border-mind/30 bg-mind-soft px-3.5 py-1.5 font-ui text-[0.9rem] text-text transition-colors duration-150 hover:border-mind/55 hover:text-mind"
+              className="inline-flex min-h-[2.25rem] items-center rounded-full border border-mind/25 bg-mind-soft px-3.5 font-ui text-[0.9rem] text-text transition-colors duration-fast hover:border-mind/55 hover:text-mind"
             >
-              <Plus size={13} weight="bold" aria-hidden className="text-mind/70" />
               {word}
             </motion.button>
           ))}

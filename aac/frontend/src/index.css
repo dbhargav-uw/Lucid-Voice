@@ -14,10 +14,8 @@
   }
 
   body {
-    @apply bg-ink text-text font-ui;
+    @apply bg-ink text-text font-ui text-aac-base;
     margin: 0;
-    font-size: 1.0625rem;
-    line-height: 1.6;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     text-rendering: optimizeLegibility;
@@ -29,11 +27,12 @@
     font-optical-sizing: auto;
   }
 
-  /* Visible focus ring on every interactive element (a11y, non-negotiable). */
+  /* Visible focus ring on every interactive element (a11y, non-negotiable).
+     The outline follows the element's own box, so we do NOT force a radius
+     here — that previously traced square corners around rounded-full pills. */
   :focus-visible {
     outline: 2px solid theme("colors.voice");
     outline-offset: 2px;
-    border-radius: 6px;
   }
 }
 
@@ -45,12 +44,27 @@
     font-family: theme("fontFamily.ui");
   }
 
-  /* Machine label (rationed, not on every section). */
+  /* Machine label (rationed, not on every section). Single source of truth —
+     matches the fontSize.eyebrow token (0.8125rem / 0.12em) so the same label
+     never renders at two sizes across views. */
   .eyebrow {
     @apply font-mono uppercase text-text-muted;
-    font-size: 0.78rem;
-    letter-spacing: 0.14em;
+    font-size: 0.8125rem;
+    line-height: 1.4;
+    letter-spacing: 0.12em;
     font-weight: 500;
+  }
+
+  /* Button bases — centering is INSEPARABLE from the fixed-height tokens so an
+     un-centered min-h (label "rides high") can never ship again. */
+  .btn-touch {
+    @apply inline-flex min-h-touch items-center justify-center gap-2 px-4;
+  }
+  .btn-cta {
+    @apply inline-flex min-h-cta min-w-cta items-center justify-center gap-2.5 px-6;
+  }
+  .tile-base {
+    @apply flex min-h-tile flex-col items-center justify-center gap-2;
   }
 
   /* Stage warmth — a faint, STATIC warm wash behind the composing area that

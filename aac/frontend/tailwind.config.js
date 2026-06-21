@@ -14,8 +14,8 @@ export default {
         "ink-line": "#D6DEE8", // hairline borders / dividers
 
         text: "#161A21", // primary text (near-black, high contrast)
-        "text-muted": "#566273", // secondary text / labels (AA on white)
-        "text-faint": "#8089A3", // placeholders, disabled
+        "text-muted": "#566273", // secondary text / labels (AA on white, ~6.6:1)
+        "text-faint": "#6B7392", // placeholders / disabled only (AA ~4.5:1 on white)
 
         // THE HUMAN — vivid coral (their words, their voice, primary actions).
         voice: "#E14826",
@@ -25,6 +25,7 @@ export default {
 
         // THE MACHINE — teal (reasoning, confidence, machine state).
         mind: "#0C8276",
+        "mind-deep": "#0A6B61", // AA-safe teal for persistent labels on mind-soft
         "mind-soft": "#DBF1ED", // light teal tint (rail panel)
 
         // Register triad — tone tags, ALWAYS paired with a text label, AA on light.
@@ -70,6 +71,8 @@ export default {
       },
       minWidth: {
         touch: "3.5rem",
+        cta: "4rem", // mirrors minHeight.cta so the primary play button stays square-ish
+        tile: "6rem",
       },
       borderRadius: {
         // Locked radius scale (one system, applied consistently).
@@ -82,6 +85,12 @@ export default {
         // Exponential ease-out — confident, no bounce. (impeccable motion rule)
         "out-expo": "cubic-bezier(0.16, 1, 0.3, 1)",
         "out-quart": "cubic-bezier(0.25, 1, 0.5, 1)",
+      },
+      transitionDuration: {
+        // Mirror lib/motion.ts DUR so CSS + Framer share one motion vocabulary.
+        fast: "160ms",
+        base: "220ms",
+        moment: "420ms",
       },
       fontSize: {
         // AAC-readable base sizes (retained).

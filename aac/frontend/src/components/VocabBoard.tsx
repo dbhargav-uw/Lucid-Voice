@@ -28,7 +28,7 @@ import {
   ChatCircle,
   type IconProps,
 } from "@phosphor-icons/react";
-import { EASE_OUT } from "../lib/motion";
+import { DUR, EASE_OUT } from "../lib/motion";
 
 export interface VocabTile {
   id: string;
@@ -174,14 +174,14 @@ const PERSON_AVATAR: Record<string, PersonAvatar> = {
 };
 
 const TILE_CLASS =
-  "group relative flex min-h-tile flex-col items-center justify-center gap-2 overflow-hidden rounded-lg border border-ink-line bg-ink-raised px-3 py-3 text-text shadow-card transition-[border-color,box-shadow] duration-200 hover:shadow-lift";
+  "tile-base group relative overflow-hidden rounded-lg border border-ink-line bg-ink-raised px-3 py-3 text-text shadow-card transition-[border-color,box-shadow] duration-fast hover:shadow-lift";
 
 export default function VocabBoard({
   onTileTap,
   categories = DEMO_CATEGORIES,
 }: VocabBoardProps) {
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-7">
       {categories.map((category) => {
         const style = CATEGORY_STYLE[category.id] ?? FALLBACK_STYLE;
         const HeaderIcon = style.icon;
@@ -189,7 +189,7 @@ export default function VocabBoard({
 
         return (
           <section key={category.id} aria-label={category.label}>
-            <h3 className="eyebrow mb-2 flex items-center gap-1.5">
+            <h3 className="eyebrow mb-3 flex items-center gap-1.5">
               <HeaderIcon
                 weight="duotone"
                 size={16}
@@ -198,7 +198,7 @@ export default function VocabBoard({
               />
               {category.label}
             </h3>
-            <div className="grid grid-cols-[repeat(auto-fill,minmax(132px,1fr))] gap-3">
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
               {category.tiles.map((tile) => {
                 const person = isPeople ? PERSON_AVATAR[tile.id] : undefined;
                 const WordIcon = WORD_ICON[tile.id];
@@ -210,13 +210,14 @@ export default function VocabBoard({
                     type="button"
                     whileHover={{ y: -3 }}
                     whileTap={{ scale: 0.97, y: 0 }}
-                    transition={{ duration: 0.18, ease: EASE_OUT }}
+                    transition={{ duration: DUR.fast, ease: EASE_OUT }}
                     onClick={() => onTileTap(tile)}
                     className={`${TILE_CLASS} ${style.hoverBorder}`}
                   >
-                    {/* thin top accent rule (calm color coding, not a fill) */}
+                    {/* thin top accent rule (calm color coding, not a fill) —
+                        inset so the rounded corners don't clip it to a notch. */}
                     <span
-                      className={`pointer-events-none absolute inset-x-0 top-0 h-[3px] ${style.rule}`}
+                      className={`pointer-events-none absolute inset-x-3 top-0 h-[3px] rounded-b-[2px] ${style.rule}`}
                       aria-hidden
                     />
 
@@ -229,7 +230,7 @@ export default function VocabBoard({
                         {AvatarIcon ? (
                           <AvatarIcon weight="duotone" size={28} />
                         ) : (
-                          <span className="font-ui text-2xl font-semibold leading-none">
+                          <span className="font-ui text-[1.6rem] font-semibold uppercase leading-none">
                             {tile.label.charAt(0)}
                           </span>
                         )}

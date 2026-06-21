@@ -4,6 +4,7 @@ import { CaretDown } from "@phosphor-icons/react";
 import SpeakerView from "./views/SpeakerView";
 import ConversationView from "./views/ConversationView";
 import GraphView from "./views/GraphView";
+import { DUR, EASE_OUT } from "./lib/motion";
 
 const NAV_ITEMS = [
   { to: "/", label: "Speak", end: true },
@@ -13,28 +14,32 @@ const NAV_ITEMS = [
 
 function TopBar() {
   return (
-    <header className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-ink-line bg-ink px-4 py-3 sm:px-6 sm:py-3.5">
+    <header className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-ink-line bg-ink px-4 py-2.5 sm:px-6">
       {/* Wordmark. */}
       <div className="flex items-center gap-2">
-        <span aria-hidden className="text-[1.35rem] leading-none text-voice">
+        <span
+          aria-hidden
+          className="text-[1.35rem] font-bold leading-none text-voice sm:text-[1.5rem]"
+        >
           ◐
         </span>
-        <span className="whitespace-nowrap font-ui text-[1.35rem] font-bold tracking-[-0.02em] text-text sm:text-[1.5rem]">
+        <span className="whitespace-nowrap font-ui text-[1.35rem] font-bold leading-none tracking-[-0.02em] text-text sm:text-[1.5rem]">
           Lucid Voice
         </span>
       </div>
 
-      {/* Static person pill (hidden on the narrowest screens to keep one row). */}
+      {/* Person switcher (hidden on the narrowest screens to keep one row). */}
       <button
         type="button"
-        className="ml-2 hidden items-center gap-1.5 rounded-full border border-ink-line bg-ink-raised px-3.5 py-1.5 font-ui text-[0.95rem] font-medium text-text sm:inline-flex"
+        aria-label="Switch person — current: Elena"
+        className="ml-1 hidden h-10 items-center gap-1.5 rounded-full border border-ink-line bg-ink-raised px-3.5 font-ui text-[0.95rem] font-medium text-text transition-colors duration-fast ease-out-quart hover:bg-ink-sunken sm:inline-flex"
       >
         Elena
         <CaretDown size={14} weight="bold" aria-hidden className="text-text-muted" />
       </button>
 
       {/* Quiet pill nav. */}
-      <nav className="ml-auto flex items-center gap-1 sm:gap-1.5">
+      <nav className="ml-auto flex items-center gap-1.5 sm:gap-2">
         {NAV_ITEMS.map((item) => (
           <NavLink
             key={item.to}
@@ -42,10 +47,10 @@ function TopBar() {
             end={item.end}
             className={({ isActive }) =>
               [
-                "min-h-touch rounded-full px-4 py-2 font-ui text-[0.95rem] font-medium transition-colors",
+                "inline-flex h-10 items-center justify-center rounded-full px-4 font-ui text-[0.95rem] font-medium transition-colors duration-fast ease-out-quart",
                 isActive
-                  ? "bg-ink-raised text-text"
-                  : "text-text-muted hover:bg-ink-raised/60 hover:text-text",
+                  ? "bg-ink-raised text-text shadow-card ring-1 ring-ink-line"
+                  : "text-text-muted hover:bg-ink-sunken hover:text-text",
               ].join(" ")
             }
           >
@@ -54,8 +59,11 @@ function TopBar() {
         ))}
       </nav>
 
-      {/* Honest status chip (only when there's room — hidden below lg). */}
-      <div className="hidden items-center gap-2 rounded-full border border-ink-line bg-ink-raised px-3 py-1.5 lg:inline-flex">
+      {/* Honest status chip — non-interactive (hidden below lg). */}
+      <div
+        role="status"
+        className="hidden h-10 items-center gap-2 rounded-full border border-transparent bg-ink-sunken px-3.5 lg:inline-flex"
+      >
         <span aria-hidden className="h-2 w-2 rounded-full bg-mind" />
         <span className="font-mono text-[0.72rem] uppercase tracking-[0.1em] text-text-muted">
           on-device · airplane-ok
@@ -84,7 +92,7 @@ export default function App() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            transition={{ duration: 0.18 }}
+            transition={{ duration: DUR.fast, ease: EASE_OUT }}
             className="h-full"
           >
             <Routes location={location}>

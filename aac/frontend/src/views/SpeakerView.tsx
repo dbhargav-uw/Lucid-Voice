@@ -14,7 +14,7 @@
 
 import { useMemo, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { Sparkle, Ear, CircleNotch, SpeakerHigh } from "@phosphor-icons/react";
+import { Sparkle, Ear, CircleNotch, SpeakerHigh, Info } from "@phosphor-icons/react";
 import { DUR, EASE_OUT } from "../lib/motion";
 import VocabBoard, { type VocabTile } from "../components/VocabBoard";
 import ConstructionStrip from "../components/ConstructionStrip";
@@ -253,7 +253,7 @@ export default function SpeakerView() {
   return (
     <div
       className={[
-        "relative grid h-full grid-cols-1 gap-6 p-6 lg:grid-cols-[1fr_380px]",
+        "relative grid h-full grid-cols-1 gap-6 p-6 md:grid-cols-[1fr_340px] lg:grid-cols-[1fr_380px]",
         speaking ? "is-speaking" : "",
       ].join(" ")}
     >
@@ -262,7 +262,7 @@ export default function SpeakerView() {
         <div className="stage-wash" aria-hidden />
 
         {/* Stage header. */}
-        <div className="relative z-10 flex items-center justify-between gap-3">
+        <div className="relative z-10">
           <StateIndicator state={state} />
         </div>
 
@@ -285,10 +285,10 @@ export default function SpeakerView() {
                   type="button"
                   onClick={() => pickHeard(preset)}
                   className={[
-                    "rounded-full border px-3.5 py-2 font-ui text-[0.9rem] transition-colors",
+                    "inline-flex h-11 items-center justify-center rounded-full border px-4 font-ui text-[0.9rem] transition-colors duration-fast",
                     active
-                      ? "border-mind/50 bg-mind-soft text-mind"
-                      : "border-ink-line bg-ink-raised text-text-muted hover:text-text",
+                      ? "border-mind/50 bg-mind-soft text-mind-deep"
+                      : "border-ink-line bg-ink-raised text-text-muted hover:bg-ink-sunken hover:text-text",
                   ].join(" ")}
                 >
                   {preset}
@@ -304,7 +304,7 @@ export default function SpeakerView() {
               }}
               placeholder="…or type what they said"
               aria-label="What the partner said"
-              className="min-h-touch flex-1 rounded-md border border-ink-line bg-ink-sunken px-3.5 font-ui text-[0.95rem] text-text placeholder:text-text-faint"
+              className="h-11 min-w-[12rem] flex-1 rounded-md border border-ink-line bg-ink-sunken px-3.5 font-ui text-[0.95rem] text-text placeholder:text-text-faint"
             />
           </div>
         </div>
@@ -324,14 +324,14 @@ export default function SpeakerView() {
         </div>
 
         {/* CTA + Tone dial. */}
-        <div className="relative z-10 flex flex-wrap items-end gap-4">
+        <div className="relative z-10 flex flex-wrap items-center gap-x-5 gap-y-4">
           <motion.button
             type="button"
             onClick={handleGenerate}
             disabled={ctaDisabled}
             whileTap={ctaDisabled ? undefined : { scale: 0.98 }}
             className={[
-              "inline-flex min-h-cta items-center gap-2.5 rounded-md px-6 font-ui text-[1.1rem] font-semibold transition-colors duration-200",
+              "btn-cta rounded-md font-ui text-[1.1rem] font-semibold transition-colors duration-base",
               ctaDisabled
                 ? "cursor-default bg-ink-raised text-text-faint"
                 : "bg-voice text-on-voice hover:bg-voice-deep",
@@ -356,7 +356,7 @@ export default function SpeakerView() {
         <section
           aria-label="Suggested replies"
           aria-live="polite"
-          className="relative z-10 flex flex-col gap-4"
+          className="relative z-10 flex flex-col gap-5"
         >
           {state === "thinking" && (
             <div
@@ -373,7 +373,7 @@ export default function SpeakerView() {
                 className="pointer-events-none absolute inset-y-0 -left-1/2 w-1/2"
                 style={{
                   background:
-                    "linear-gradient(90deg, transparent, rgba(244,239,233,0.05), transparent)",
+                    "linear-gradient(90deg, transparent, rgba(12,130,118,0.08), transparent)",
                 }}
                 animate={{ x: ["0%", "300%"] }}
                 transition={{ duration: 1.3, repeat: Infinity, ease: "linear" }}
@@ -384,10 +384,9 @@ export default function SpeakerView() {
           {(state === "candidates" || state === "speaking") && (
             <>
               {abstainMsg ? (
-                <div className="rounded-xl border border-ink-line bg-ink-raised p-6">
-                  <p className="m-0 font-utter text-candidate text-text-muted">
-                    {abstainMsg}
-                  </p>
+                <div className="flex items-start gap-3 rounded-xl border border-ink-line bg-ink-raised p-6">
+                  <Info size={20} weight="fill" aria-hidden className="mt-0.5 shrink-0 text-mind" />
+                  <p className="m-0 font-ui text-aac-base text-text">{abstainMsg}</p>
                 </div>
               ) : (
                 <AnimatePresence>
@@ -414,10 +413,10 @@ export default function SpeakerView() {
               transition={{ duration: DUR.base, ease: EASE_OUT }}
               className="rounded-xl border border-voice/45 bg-voice-soft p-6 shadow-utter"
             >
-              <p className="m-0 font-utter text-stage font-medium leading-tight text-text text-balance">
+              <p className="m-0 max-w-[32ch] font-utter text-candidate font-medium leading-snug text-text text-pretty">
                 {chosenText}
               </p>
-              <p className="mt-3 inline-flex items-center gap-1.5 font-mono text-[0.72rem] uppercase tracking-[0.12em] text-voice/80">
+              <p className="mt-4 inline-flex items-center gap-1.5 border-t border-voice/15 pt-3 font-mono text-[0.72rem] uppercase tracking-[0.12em] text-voice-deep">
                 <SpeakerHigh size={13} weight="fill" aria-hidden />
                 Spoken in Elena’s voice
               </p>
@@ -427,14 +426,14 @@ export default function SpeakerView() {
       </section>
 
       {/* Reasoning rail. */}
-      <div className="min-h-[300px] lg:min-h-0">
+      <div className="min-h-[18rem] md:min-h-0">
         <ReasoningRail data={rail} thinking={state === "thinking"} />
       </div>
 
       {/* Vocab well — full width below the two-zone layout. */}
       <section
         aria-label="Vocabulary"
-        className="rounded-xl border border-ink-line bg-ink-sunken p-5 lg:col-span-2"
+        className="rounded-xl border border-ink-line bg-ink-sunken p-5 md:col-span-2"
       >
         <VocabBoard onTileTap={handleTileTap} />
       </section>

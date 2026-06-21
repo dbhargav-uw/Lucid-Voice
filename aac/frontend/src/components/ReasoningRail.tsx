@@ -89,7 +89,7 @@ function ConfidenceMeter({ value }: { value: number }) {
             animate={{ opacity: 1, scaleY: 1 }}
             transition={{ delay: reduce ? 0 : 0.025 * i, duration: 0.2, ease: EASE_OUT }}
             className={`h-3.5 flex-1 origin-bottom rounded-[2px] ${
-              i < filled ? "bg-mind" : "bg-ink-line"
+              i < filled ? "bg-mind" : "border border-mind/20 bg-transparent"
             }`}
           />
         ))}
@@ -107,11 +107,11 @@ export default function ReasoningRail({ data, thinking }: ReasoningRailProps) {
   return (
     <aside
       aria-label="Reasoning"
-      className="scroll-ink flex h-full flex-col gap-6 overflow-y-auto rounded-xl border border-ink-line bg-mind-soft/30 p-5"
+      className="scroll-ink flex h-full flex-col gap-6 overflow-y-auto rounded-xl border border-ink-line bg-mind-soft/30 p-6"
     >
       <div className="flex items-center gap-2.5">
         <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-mind" />
-        <h2 className="font-mono text-[0.7rem] uppercase tracking-[0.16em] text-mind">
+        <h2 className="font-mono text-[0.75rem] font-semibold uppercase tracking-[0.14em] text-mind">
           Decision trail
         </h2>
       </div>
@@ -159,7 +159,7 @@ export default function ReasoningRail({ data, thinking }: ReasoningRailProps) {
               {data.grounded.map((g, i) => (
                 <span
                   key={`${g}-${i}`}
-                  className="rounded-md border border-mind/25 bg-mind-soft px-2 py-1 text-[0.78rem] text-mind"
+                  className="rounded-md border border-mind/25 bg-mind-soft px-2 py-[5px] text-[0.78rem] text-mind-deep"
                 >
                   {g}
                 </span>

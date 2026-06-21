@@ -70,7 +70,7 @@ export default function StageOverlay({ open, text, playing, onClose }: StageOver
             type="button"
             onClick={onClose}
             aria-label="Done"
-            className="absolute right-6 top-6 inline-flex min-h-touch items-center gap-2 rounded-full border border-ink-line bg-ink-raised px-4 font-ui text-[0.95rem] font-medium text-text-muted shadow-card transition-colors duration-150 hover:text-text"
+            className="btn-touch absolute right-6 top-6 rounded-full border border-ink-line bg-ink-raised font-ui text-[0.95rem] font-medium text-text-muted shadow-card transition-colors duration-fast hover:text-text"
           >
             <X size={18} weight="bold" aria-hidden />
             Done
@@ -81,18 +81,23 @@ export default function StageOverlay({ open, text, playing, onClose }: StageOver
             initial={reduce ? { opacity: 0 } : { opacity: 0, y: 14, filter: "blur(6px)" }}
             animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
             transition={reduce ? { duration: DUR.base } : SPRING}
-            className="m-0 max-w-[18ch] text-center font-utter text-stage font-medium leading-tight text-text text-balance"
+            className="m-0 max-w-[22ch] text-center font-utter text-stage font-medium leading-tight text-text text-balance"
           >
             {text}
           </motion.p>
 
-          {/* Speaking animation while audio plays. */}
-          <div className="flex min-h-[120px] flex-col items-center justify-center gap-4">
+          {/* Speaking cue while audio plays — reserves height ONLY when playing
+              so the attribution caption isn't orphaned over a void otherwise. */}
+          <div
+            className={`flex flex-col items-center justify-center gap-5 ${
+              playing ? "min-h-[128px]" : ""
+            }`}
+          >
             {playing ? (
               reduce ? (
-                // Reduced motion: a calm static cue, no looping animation.
-                <span className="inline-flex items-center gap-2 font-mono text-[0.74rem] uppercase tracking-[0.12em] text-voice">
-                  <SpeakerHigh size={16} weight="fill" aria-hidden />
+                // Reduced motion: a calm static cue with presence, no loop.
+                <span className="inline-flex items-center gap-2 rounded-full bg-voice-soft px-4 py-2 font-mono text-[0.8125rem] uppercase tracking-[0.12em] text-voice-deep">
+                  <SpeakerHigh size={18} weight="fill" aria-hidden />
                   Speaking
                 </span>
               ) : lottieOk ? (
@@ -100,12 +105,12 @@ export default function StageOverlay({ open, text, playing, onClose }: StageOver
                   <Lottie animationData={voicePulse} loop autoplay />
                 </div>
               ) : (
-                // Fallback if Lottie cannot render.
-                <Waveform playing className="h-10" />
+                // Fallback if Lottie cannot render — full-presence sound bar.
+                <Waveform playing size="lg" />
               )
             ) : null}
 
-            <span className="inline-flex items-center gap-1.5 font-mono text-[0.72rem] uppercase tracking-[0.12em] text-voice/80">
+            <span className="inline-flex items-center gap-1.5 font-mono text-[0.72rem] uppercase tracking-[0.12em] text-voice-deep">
               <SpeakerHigh size={13} weight="fill" aria-hidden />
               Spoken in Elena’s voice
             </span>

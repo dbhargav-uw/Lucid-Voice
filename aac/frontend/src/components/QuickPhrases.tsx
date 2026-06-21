@@ -15,7 +15,7 @@ import {
   HandsClapping,
   type IconProps,
 } from "@phosphor-icons/react";
-import { EASE_OUT } from "../lib/motion";
+import { DUR, EASE_OUT } from "../lib/motion";
 
 type PhosphorIcon = ComponentType<IconProps>;
 
@@ -53,7 +53,7 @@ export default function QuickPhrases({ onSpeak, disabled = false }: QuickPhrases
       <div
         role="list"
         aria-label="Quick phrases"
-        className="flex gap-2 overflow-x-auto pb-1 [scrollbar-width:thin]"
+        className="flex snap-x snap-mandatory gap-2 overflow-x-auto pb-1 pr-2 [scrollbar-width:thin]"
       >
         {QUICK_PHRASES.map((p) => {
           const Icon = p.icon;
@@ -63,10 +63,11 @@ export default function QuickPhrases({ onSpeak, disabled = false }: QuickPhrases
               type="button"
               role="listitem"
               disabled={disabled}
+              whileHover={reduce || disabled ? undefined : { y: -2 }}
               whileTap={reduce || disabled ? undefined : { scale: 0.97 }}
-              transition={{ duration: 0.16, ease: EASE_OUT }}
+              transition={{ duration: DUR.fast, ease: EASE_OUT }}
               onClick={() => onSpeak(p.text)}
-              className="inline-flex min-h-touch shrink-0 items-center gap-2 rounded-full border border-ink-line bg-ink-raised px-4 py-2 font-ui text-[0.95rem] text-text shadow-card transition-colors duration-150 enabled:hover:border-voice/45 enabled:hover:text-voice-deep disabled:cursor-default disabled:opacity-40"
+              className="inline-flex min-h-touch shrink-0 snap-start items-center gap-2 rounded-full border border-ink-line bg-ink-raised px-4 font-ui text-[0.9rem] text-text shadow-card transition-[color,border-color,box-shadow] duration-fast enabled:hover:border-voice/45 enabled:hover:text-voice-deep enabled:hover:shadow-lift disabled:cursor-default disabled:opacity-40"
             >
               <Icon size={18} weight="duotone" aria-hidden className="text-voice" />
               {p.text}

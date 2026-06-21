@@ -40,9 +40,7 @@ export default function ToneDial({ value, onChange }: ToneDialProps) {
 
   return (
     <div className="flex flex-col gap-1.5">
-      <span className="font-mono text-[0.7rem] uppercase tracking-[0.12em] text-text-faint">
-        Tone
-      </span>
+      <span className="eyebrow">Tone</span>
       <div
         role="radiogroup"
         aria-label="Reply tone"
@@ -62,7 +60,7 @@ export default function ToneDial({ value, onChange }: ToneDialProps) {
               tabIndex={selected ? 0 : -1}
               onClick={() => onChange(tone.id)}
               onKeyDown={(e) => onKeyDown(e, i)}
-              className="relative inline-flex min-h-touch items-center rounded-full px-3.5 font-ui text-[0.9rem] font-medium transition-colors duration-150"
+              className="relative inline-flex min-h-[2.75rem] items-center justify-center rounded-full px-4 font-ui text-[0.9rem] transition-colors duration-fast"
             >
               {selected && (
                 <motion.span
@@ -76,10 +74,12 @@ export default function ToneDial({ value, onChange }: ToneDialProps) {
                   aria-hidden
                 />
               )}
+              {/* font-semibold ALWAYS so the sliding indicator never lands on a
+                  just-resized box; selection differs by color only. */}
               <span
                 className={[
-                  "relative z-10",
-                  selected ? `${tone.active} font-semibold` : "text-text-muted",
+                  "relative z-10 font-semibold",
+                  selected ? tone.active : "text-text-muted hover:text-text",
                 ].join(" ")}
               >
                 {tone.label}
