@@ -27,3 +27,19 @@ coqui-tts==0.27.5               # Coqui XTTS-v2 voice clone (idiap fork)
 torchaudio==2.11.0              # audio IO for coqui-tts
 torchcodec==0.14.0              # audio decode/encode (requires system FFmpeg)
 anthropic==0.42.0               # optional cloud LLM provider (opt-in via env)
+
+# ---------------------------------------------------------------------------
+# Sponsor integrations. All OPT-IN and lazy-imported/guarded, so the app still
+# imports and runs fully offline (airplane mode) when these are absent or the
+# integration is disabled via env. Install to demo the respective feature.
+# ---------------------------------------------------------------------------
+sentry-sdk[fastapi]==2.20.0     # Sentry error monitoring (no-op without SENTRY_DSN)
+redis==5.2.1                    # Redis Stack client (vector KNN + cache + memory)
+# Arize Phoenix — LOCAL LLM tracing + eval (opt-in via PHOENIX_ENABLED). Pulls in
+# OpenTelemetry + OpenInference. Also needs a system Redis STACK (RediSearch) for
+# the Redis vector index, installed separately (see .env.example).
+arize-phoenix==7.9.0
+arize-phoenix-otel==0.7.0
+openinference-semantic-conventions==0.1.12
+opentelemetry-sdk
+opentelemetry-exporter-otlp-proto-http

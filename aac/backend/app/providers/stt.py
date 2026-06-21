@@ -131,14 +131,24 @@ class WhisperLocalProvider(STTProvider):
 
 
 class DeepgramProvider(STTProvider):
-    """Cloud Deepgram provider (opt-in). Sends the raw encoded bytes; Deepgram
-    auto-detects the container/codec (webm/opus, wav, ...)."""
+    """Cloud Deepgram provider (opt-in, STT_PROVIDER=deepgram).
+
+    Sends the raw encoded audio bytes to Deepgram's pre-recorded ``/v1/listen``
+    endpoint. Deepgram auto-detects the container/codec (browser webm/opus, wav,
+    m4a, ...), so no client-side ffmpeg decode is needed on this path. The API
+    key comes from ``settings.deepgram_api_key`` (env DEEPGRAM_API_KEY); without
+    it the factory falls back to local Whisper, so this provider is only ever
+    constructed when a key is present.
+    """
+
+    LISTEN_URL = "https://api.deepgram.com/v1/listen"
 
     def __init__(self) -> None:
         from app.config import settings
 
         self.api_key: str | None = getattr(settings, "deepgram_api_key", None)
         self.model: str = getattr(settings, "deepgram_model", "nova-2")
+        self.language: str = getattr(settings, "whisper_language", "en") or ""
         self.timeout: float = float(getattr(settings, "stt_timeout", 60.0))
 
     def transcribe(self, audio_b64: str) -> str:
@@ -149,14 +159,24 @@ class DeepgramProvider(STTProvider):
             audio_bytes = base64.b64decode(audio_b64 or "")
             if not audio_bytes:
                 return ""
-            url = "https://api.deepgram.com/v1/listen"
-            headers = {"Authorization": f"Token {self.api_key}"}
-            params = {"model": self.model, "smart_format": "true"}
+            headers = {
+                "Authorization": f"Token {self.api_key}",
+                # Browser MediaRecorder produces webm/opus; declaring it helps
+                # Deepgram pick the decoder (it still auto-detects if wrong).
+                "Content-Type": "audio/webm",
+            }
+            params = {"model": self.model, "smart_format": "true", "punctuate": "true"}
+            if self.language:
+                params["language"] = self.language
             with httpx.Client(timeout=self.timeout) as client:
-                resp = client.post(url, headers=headers, params=params, content=audio_bytes)
+                resp = client.post(
+                    self.LISTEN_URL, headers=headers, params=params, content=audio_bytes
+                )
                 resp.raise_for_status()
                 data = resp.json()
-            return data["results"]["channels"][0]["alternatives"][0]["transcript"]
+            return (
+                data["results"]["channels"][0]["alternatives"][0]["transcript"]
+            ).strip()
         except Exception as exc:  # pragma: no cover - cloud path
             logger.error("Deepgram transcription failed: %s", exc)
             return ""

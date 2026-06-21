@@ -42,6 +42,31 @@ class Settings(BaseSettings):
     deepgram_api_key: str = ""
     elevenlabs_api_key: str = ""
 
+    # --- Sentry (error monitoring; opt-in, offline-safe) ---
+    # When sentry_dsn is empty, Sentry initialization is a clean no-op so the app
+    # runs fully offline. Set SENTRY_DSN to enable error + performance capture.
+    sentry_dsn: str = ""
+    sentry_traces_sample_rate: float = 1.0
+    sentry_environment: str = "development"
+
+    # --- Redis Stack (on-device agent memory + vector search; opt-in) ---
+    # LOCAL Redis Stack (RediSearch) backs vector KNN retrieval, the TTS audio
+    # cache, and session/agent memory. When redis_enabled is False OR Redis is
+    # unreachable, every consumer falls back to the in-process / on-disk path, so
+    # airplane mode is never broken. Keep the URL pointed at a LOCAL server.
+    redis_enabled: bool = False
+    redis_url: str = "redis://localhost:6379/0"
+    redis_prefix: str = "lucid"
+    redis_socket_timeout: float = 0.5  # fast-fail so fallback is snappy
+
+    # --- Arize Phoenix (LLM tracing/eval; runs LOCALLY, opt-in) ---
+    # When phoenix_enabled is False the tracing helpers are no-ops, so the app
+    # has no cloud dependency. Phoenix is open-source and runs on-device; point
+    # the collector at a local Phoenix instance (default port 6006).
+    phoenix_enabled: bool = False
+    phoenix_collector_endpoint: str = "http://localhost:6006/v1/traces"
+    phoenix_project_name: str = "lucid-voice"
+
     # --- Local models ---
     embedding_model: str = "BAAI/bge-small-en-v1.5"
     whisper_model: str = "small.en"
