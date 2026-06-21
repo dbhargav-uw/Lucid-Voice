@@ -32,6 +32,55 @@ type Phase = "asking" | "ready" | "thinking" | "candidates" | "saving";
 
 const FALLBACK_FIRST = "Tell me about someone important in your life.";
 
+// A single transcript turn — assistant (teal, left) vs the user (coral, right).
+function TurnBubble({ role, text }: { role: "assistant" | "user"; text: string }) {
+  const isAI = role === "assistant";
+  return (
+    <div className={["flex w-full gap-2", isAI ? "flex-row" : "flex-row-reverse"].join(" ")}>
+      <span
+        aria-hidden
+        className={[
+          "mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full border font-mono text-[0.68rem] font-semibold",
+          isAI
+            ? "border-mind/30 bg-mind-soft text-mind-deep"
+            : "border-voice/30 bg-voice-soft text-voice-deep",
+        ].join(" ")}
+      >
+        {isAI ? "AI" : "E"}
+      </span>
+      <div
+        className={[
+          "max-w-[82%] rounded-xl border px-3.5 py-2",
+          isAI
+            ? "rounded-tl-md border-mind/25 bg-mind-soft"
+            : "rounded-tr-md border-voice/25 bg-voice-soft",
+        ].join(" ")}
+      >
+        <p className="m-0 font-ui text-[0.92rem] leading-snug text-text text-pretty">{text}</p>
+      </div>
+    </div>
+  );
+}
+
+function ThinkingBubble() {
+  return (
+    <div className="flex w-full gap-2">
+      <span
+        aria-hidden
+        className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-mind/30 bg-mind-soft font-mono text-[0.68rem] font-semibold text-mind-deep"
+      >
+        AI
+      </span>
+      <div className="rounded-xl rounded-tl-md border border-mind/25 bg-mind-soft px-3.5 py-2">
+        <span className="inline-flex items-center gap-2 font-ui text-[0.9rem] text-mind-deep">
+          <CircleNotch size={14} weight="bold" className="animate-spin" aria-hidden />
+          Thinking…
+        </span>
+      </div>
+    </div>
+  );
+}
+
 export default function BuildBrainPanel({ personId, onConfirmed, onGenerated, onExit }: Props) {
   const [history, setHistory] = useState<AssistantTurnMessage[]>([]);
   const [question, setQuestion] = useState<string>("");
@@ -42,6 +91,7 @@ export default function BuildBrainPanel({ personId, onConfirmed, onGenerated, on
   const [answered, setAnswered] = useState(0);
   const askedRef = useRef(false);
   const busyRef = useRef(false);
+  const transcriptRef = useRef<HTMLDivElement | null>(null);
 
   // The assistant opens with the first question.
   useEffect(() => {
@@ -50,6 +100,12 @@ export default function BuildBrainPanel({ personId, onConfirmed, onGenerated, on
     void askNext([]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Keep the transcript pinned to the newest turn.
+  useEffect(() => {
+    const el = transcriptRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [history.length, phase]);
 
   async function askNext(hist: AssistantTurnMessage[]) {
     setPhase("asking");
@@ -141,7 +197,6 @@ export default function BuildBrainPanel({ personId, onConfirmed, onGenerated, on
   }
 
   const composing = phase === "asking";
-  const lastUser = [...history].reverse().find((m) => m.role === "user");
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-3 bg-ink p-4 text-text">
@@ -173,34 +228,17 @@ export default function BuildBrainPanel({ personId, onConfirmed, onGenerated, on
       </header>
 
       <div className="scroll-ink flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto pr-1">
-          {/* Assistant question (teal = the machine; distinct from the human coral). */}
-          <div className="flex items-start gap-2.5">
-            <span
-              aria-hidden
-              className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-mind/30 bg-mind-soft font-mono text-[0.8rem] font-semibold text-mind-deep"
-            >
-              AI
-            </span>
-            <div className="min-w-0 flex-1">
-              <span className="eyebrow text-mind-deep">Assistant</span>
-              <div className="mt-1 rounded-xl rounded-tl-md border border-mind/25 bg-mind-soft px-4 py-2.5">
-                {composing ? (
-                  <span className="inline-flex items-center gap-2 font-ui text-aac-base text-mind-deep">
-                    <CircleNotch size={16} weight="bold" className="animate-spin" aria-hidden />
-                    Thinking of a question…
-                  </span>
-                ) : (
-                  <p aria-live="polite" className="m-0 font-ui text-aac-base text-text">
-                    {question}
-                  </p>
-                )}
-              </div>
-              {lastUser && (
-                <p className="mt-1.5 px-1 font-ui text-[0.8rem] text-text-muted">
-                  You answered: “{lastUser.text}”
-                </p>
-              )}
-            </div>
+          {/* Conversation transcript — the interview so far; scrolls on its own. */}
+          <div
+            ref={transcriptRef}
+            aria-label="Interview conversation"
+            aria-live="polite"
+            className="scroll-ink flex max-h-[34vh] min-h-[92px] shrink-0 flex-col gap-2.5 overflow-y-auto rounded-xl border border-ink-line bg-ink-sunken p-3"
+          >
+            {history.map((m, i) => (
+              <TurnBubble key={i} role={m.role} text={m.text} />
+            ))}
+            {composing && <ThinkingBubble />}
           </div>
 
           {/* Construction strip — tap tiles or type words directly. */}
@@ -212,10 +250,12 @@ export default function BuildBrainPanel({ personId, onConfirmed, onGenerated, on
           />
 
           {/* Predictive next words (8, adapting to the assistant's question). */}
-          <NextFragments fragments={fragments} context={question} onSuggest={tap} />
+          <div className="shrink-0">
+            <NextFragments fragments={fragments} context={question} onSuggest={tap} />
+          </div>
 
           {/* Answer CTA. */}
-          <div className="flex items-center gap-3">
+          <div className="flex shrink-0 items-center gap-3">
             <motion.button
               type="button"
               onClick={answer}
@@ -248,7 +288,7 @@ export default function BuildBrainPanel({ personId, onConfirmed, onGenerated, on
           {/* Candidate cards (reused) — CandidateCard owns its own enter/exit
               motion; an extra wrapper here deadlocks the exit and leaves stale
               cards (whose onSay closure is stale), so render it directly. */}
-          <section aria-label="Answer options" className="flex flex-col gap-3">
+          <section aria-label="Answer options" className="flex shrink-0 flex-col gap-3">
             <AnimatePresence>
               {(phase === "candidates" || phase === "saving") &&
                 candidates.map((c, i) => (
@@ -268,7 +308,7 @@ export default function BuildBrainPanel({ personId, onConfirmed, onGenerated, on
           {/* Vocabulary tiles (reused) — tap to add words. */}
           <section
             aria-label="Vocabulary"
-            className="rounded-xl border border-ink-line bg-ink-sunken p-3 sm:p-4"
+            className="shrink-0 rounded-xl border border-ink-line bg-ink-sunken p-3 sm:p-4"
           >
             <VocabBoard onTileTap={tap} />
           </section>

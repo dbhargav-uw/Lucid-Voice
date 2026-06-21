@@ -52,7 +52,7 @@ const CARD_STYLE: CSSProperties = {
 // match. 320 matches the memory-growth card width; 210 is ~50% shorter than
 // the reconstruction card's previous height, keeping the brain centered.
 const PANEL_W = 320;
-const PANEL_H = 210;
+const PANEL_H = 240; // shared height for the matching bottom cards (legend + reconstruction)
 
 interface TraceCandidate {
   text: string;
@@ -565,7 +565,7 @@ export default function GraphView() {
               bottom: 14,
               right: 14,
               width: PANEL_W,
-              maxHeight: PANEL_H,
+              height: PANEL_H,
               padding: "9px 11px",
               display: "flex",
               flexDirection: "column",

@@ -33,8 +33,8 @@ export default function ConstructionStrip({
   };
 
   return (
-    <div className="flex min-h-[64px] items-center gap-3 rounded-lg border border-ink-line bg-ink-raised px-4 py-3 shadow-card">
-      <div className="flex flex-1 flex-wrap items-center gap-2">
+    <div className="flex min-h-[64px] shrink-0 items-center gap-3 rounded-lg border border-ink-line bg-ink-raised px-4 py-3 shadow-card">
+      <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
         {empty && !onAddWord ? (
           <span className="text-aac-base text-text-faint">Tap words to begin.</span>
         ) : (
@@ -47,7 +47,7 @@ export default function ConstructionStrip({
                 animate={{ opacity: 1, y: 0, scale: 1 }}
                 exit={{ opacity: 0, scale: 0.92 }}
                 transition={{ duration: DUR.base, ease: EASE_OUT }}
-                className="inline-flex items-center gap-1.5 rounded-full border border-voice/30 bg-voice-soft py-2 pl-4 pr-1.5 text-aac-base font-medium text-text"
+                className="inline-flex max-w-full items-center gap-1.5 break-words rounded-full border border-voice/30 bg-voice-soft py-2 pl-4 pr-1.5 text-aac-base font-medium text-text"
               >
                 {fragment}
                 <button

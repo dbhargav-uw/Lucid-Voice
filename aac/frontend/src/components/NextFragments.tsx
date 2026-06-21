@@ -40,8 +40,35 @@ const GENERIC_ANSWERS = ["yes", "no", "maybe", "thank you", "please", "tired", "
 // match are combined (in order) so the suggestions reflect the whole utterance,
 // not just the first keyword hit. Words are reply-oriented (how Elena answers).
 const CONTEXT_STARTERS: { match: RegExp; words: string[] }[] = [
+  // --- Build-Your-Brain interview questions: content words that answer them ---
   {
-    match: /\b(dinner|eat|eating|food|meal|lunch|breakfast|hungry|cook|come over|visit|over)\b/i,
+    // "what do you call / your nickname for / how do you address …"
+    match: /\bnicknames?\b|\bnamed?\b|\baddress(?:es)?\b|what do you call|usually call|do you call/i,
+    words: ["dear", "love", "honey", "sweetie", "buddy", "friend", "pal", "mom"],
+  },
+  {
+    // who / family / friends / relationships
+    match: /\b(who|people|family|families|relative|relatives|friend|friends|partner|spouse|married|kids|children|grandchild|grandchildren|important people)\b/i,
+    words: ["sister", "brother", "friend", "daughter", "son", "neighbor", "wife", "husband"],
+  },
+  {
+    // daily routine / time of day (kept off food words so dinner replies are unaffected)
+    match: /\b(routine|usually|typical|normal day|your day|every ?day|each day|wake|woke|get up|spend your|morning|afternoon|evening|mornings|evenings)\b/i,
+    words: ["morning", "garden", "walk", "rest", "tea", "coffee", "reading", "family"],
+  },
+  {
+    // places
+    match: /\b(where|place|places|go|going|gone|live|living|spend|visit|visiting|town|outside|nearby)\b/i,
+    words: ["home", "garden", "park", "church", "store", "kitchen", "outside", "downtown"],
+  },
+  {
+    // interests / hobbies / likes
+    match: /\b(like|likes|enjoy|enjoys|favorite|favourite|hobby|hobbies|interest|interests|fun|love to|cherish|passion)\b/i,
+    words: ["reading", "music", "cooking", "gardening", "walking", "family", "painting", "tv"],
+  },
+  // --- Conversation-mode replies to a partner statement ---
+  {
+    match: /\b(dinner|eat|eating|food|meal|lunch|breakfast|hungry|cook|come over|over)\b/i,
     words: ["yes", "maybe", "tired", "later", "love", "thank you", "not sure", "hungry"],
   },
   {
