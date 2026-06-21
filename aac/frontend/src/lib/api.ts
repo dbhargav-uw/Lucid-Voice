@@ -100,6 +100,8 @@ export interface AssistantTurnRequest {
 
 export interface AssistantTurnResponse {
   text: string;
+  // Short, question-specific answer words for the "Next" suggestions.
+  suggestions?: string[];
 }
 
 export interface ConsolidateRequest {

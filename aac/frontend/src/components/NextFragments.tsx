@@ -131,23 +131,39 @@ export interface NextFragmentsProps {
   fragments: string[];
   // The latest partner utterance — used to seed the suggestions.
   context?: string;
+  // Explicit, question-specific suggestions (e.g. LLM-generated in Build Your
+  // Brain). When provided they take precedence over the keyword categories.
+  suggestions?: string[];
   // Mirrors the vocab-tile contract so the view can reuse handleTileTap.
   onSuggest: (tile: VocabTile) => void;
 }
 
-function suggestionsFor(fragments: string[], context?: string): string[] {
+function suggestionsFor(
+  fragments: string[],
+  context?: string,
+  provided?: string[],
+): string[] {
   const have = new Set(fragments.map((f) => f.toLowerCase().trim()));
+  const last = fragments[fragments.length - 1]?.toLowerCase().trim() ?? "";
+  const cont = fragments.length ? NEXT_MAP[last] ?? [] : [];
+  // Explicit (question-specific) suggestions win; continuations of the last
+  // tapped word lead once the user starts building.
+  if (provided && provided.length) {
+    return fillTo([...cont, ...provided], have, COUNT);
+  }
   if (fragments.length === 0) {
     return fillTo(contextWords(context), have, COUNT);
   }
-  // Mid-construction: continuations of the last word first, then context, then pad.
-  const last = fragments[fragments.length - 1]?.toLowerCase().trim() ?? "";
-  const cont = NEXT_MAP[last] ?? [];
   return fillTo([...cont, ...contextWords(context)], have, COUNT);
 }
 
-export default function NextFragments({ fragments, context, onSuggest }: NextFragmentsProps) {
-  const suggestions = suggestionsFor(fragments, context);
+export default function NextFragments({
+  fragments,
+  context,
+  suggestions: provided,
+  onSuggest,
+}: NextFragmentsProps) {
+  const suggestions = suggestionsFor(fragments, context, provided);
 
   return (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-2">

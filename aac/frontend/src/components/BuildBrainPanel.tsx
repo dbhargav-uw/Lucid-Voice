@@ -89,6 +89,7 @@ export default function BuildBrainPanel({ personId, onConfirmed, onGenerated, on
   const [candidates, setCandidates] = useState<Candidate[]>([]);
   const [selectedIdx, setSelectedIdx] = useState<number | null>(null);
   const [answered, setAnswered] = useState(0);
+  const [suggestions, setSuggestions] = useState<string[]>([]);
   const askedRef = useRef(false);
   const busyRef = useRef(false);
   const transcriptRef = useRef<HTMLDivElement | null>(null);
@@ -109,15 +110,19 @@ export default function BuildBrainPanel({ personId, onConfirmed, onGenerated, on
 
   async function askNext(hist: AssistantTurnMessage[]) {
     setPhase("asking");
+    setSuggestions([]);
     let text = "";
+    let sugg: string[] = [];
     try {
       const res = await assistantTurn({ person_id: personId, history: hist });
       text = (res.text || "").trim();
+      sugg = res.suggestions ?? [];
     } catch {
       text = "";
     }
     if (!text) text = hist.length ? "What else would you like me to know?" : FALLBACK_FIRST;
     setQuestion(text);
+    setSuggestions(sugg);
     setHistory([...hist, { role: "assistant", text }]);
     setPhase("ready");
   }
@@ -253,9 +258,15 @@ export default function BuildBrainPanel({ personId, onConfirmed, onGenerated, on
             onAddWord={(w) => tap({ id: `typed-${w}`, label: w })}
           />
 
-          {/* Predictive next words (8, adapting to the assistant's question). */}
+          {/* Predictive next words — question-specific suggestions from the
+              assistant (keyword categories as the offline fallback). */}
           <div className="shrink-0">
-            <NextFragments fragments={fragments} context={question} onSuggest={tap} />
+            <NextFragments
+              fragments={fragments}
+              context={question}
+              suggestions={suggestions}
+              onSuggest={tap}
+            />
           </div>
 
           {/* Answer CTA. */}
