@@ -6,12 +6,6 @@
 
 **A local-first AAC app that turns 2–3 tapped words into a full, situationally‑correct sentence — spoken in a cloned version of the user's own voice.**
 
-<br/>
-
-![The Lucid Voice memory graph, firing](presentation/brain.jpg)
-
-<sub>The user's personal memory graph, rendered as a living brain. The exact memories that grounded a reply light up in real time.</sub>
-
 </div>
 
 ---
@@ -164,7 +158,6 @@ aac/
 │       ├── hooks/useSpeak.ts  cloned-audio-first playback, browser-voice fallback
 │       └── lib/               api · demo (offline fallback) · motion tokens
 └── run.sh                     one-command dev launcher
-presentation/                  the pitch/demo deck (Lucid-Voice.pptx)
 ```
 
 ## Design language
@@ -173,7 +166,7 @@ Two characters, two colors: **coral = the human** (your words, your voice, your 
 
 ## Status
 
-Built as a demo‑first hackathon project. Running today: the unified Conversation surface with a real speech‑to‑text turn‑loop, the 3D memory brain + "Build your brain," cloned‑voice playback (with a graceful browser‑voice fallback), and a polished, accessible UI. A pitch/demo deck lives in [`presentation/`](presentation/).
+Built as a demo‑first hackathon project. Running today: the unified Conversation surface with a real speech‑to‑text turn‑loop, the 3D memory brain + "Build your brain," cloned‑voice playback (with a graceful browser‑voice fallback), and a polished, accessible UI.
 
 ---
 

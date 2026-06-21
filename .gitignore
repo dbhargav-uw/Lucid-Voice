@@ -1,7 +1,3 @@
 # OS
 .DS_Store
 **/.DS_Store
-
-# Presentation deck — keep sources + outputs, ignore deps & QA renders
-presentation/node_modules/
-presentation/slides/
