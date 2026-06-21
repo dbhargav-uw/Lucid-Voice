@@ -181,6 +181,8 @@ class AssistantTurnRequest(BaseModel):
 
 class AssistantTurnResponse(BaseModel):
     text: str
+    # Short, question-specific answer words the UI offers as "Next" suggestions.
+    suggestions: list[str] = Field(default_factory=list)
 
 
 # --- /stt -------------------------------------------------------------------

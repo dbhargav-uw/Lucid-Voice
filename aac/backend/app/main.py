@@ -385,11 +385,13 @@ def assistant_turn(req: AssistantTurnRequest) -> AssistantTurnResponse:
         return AssistantTurnResponse(text=fallback)
     try:
         history = [{"role": m.role, "text": m.text} for m in req.history]
-        text = learning.interview_question(req.person_id, history)
+        result = learning.interview_question(req.person_id, history)
+        text = result.get("question") or fallback
+        suggestions = result.get("suggestions", [])
     except Exception as exc:  # pragma: no cover - defensive
         logger.error("assistant_turn(%r) failed: %s", req.person_id, exc)
-        text = fallback
-    return AssistantTurnResponse(text=text or fallback)
+        text, suggestions = fallback, []
+    return AssistantTurnResponse(text=text, suggestions=suggestions)
 
 
 @app.post("/consolidate", response_model=ConsolidateResponse)

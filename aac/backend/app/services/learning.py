@@ -17,6 +17,7 @@ deps are reached only through the injected providers/graph service.
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 import time
 from datetime import datetime, timezone
@@ -38,8 +39,8 @@ _ASSISTANT_SYSTEM = (
     "remembering: the important people in their life and what they call them, "
     "their daily routines, the places they go, and the things they like and care "
     "about. Prefer the topics the notes say are missing. Never ask more than one "
-    "question at once, and do not explain yourself or add commentary — reply with "
-    "just the next question, one or two warm sentences."
+    "question at once, keep it warm and short (one or two sentences), and reply in "
+    "exactly the response format the user asks for."
 )
 
 # Mentions only link to these "real" entity kinds (not events/phrases).
@@ -400,12 +401,47 @@ class LearningService:
                 return line
         return ""
 
-    def interview_question(self, person_id: str, history: list[dict[str, str]]) -> str:
-        """Return the next warm, graph-aware interview question (one at a time).
+    @staticmethod
+    def _parse_interview(raw: str) -> tuple[str, list[str]]:
+        """Parse the interviewer JSON {question, suggestions}. Falls back to
+        treating the whole reply as the question (suggestions empty)."""
+        if not raw:
+            return "", []
+        text = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL | re.IGNORECASE).strip()
+        start, end = text.find("{"), text.rfind("}")
+        if start != -1 and end != -1 and end > start:
+            try:
+                obj = json.loads(text[start : end + 1])
+                q = str(obj.get("question") or "").strip()
+                raw_sugg = obj.get("suggestions") or []
+                clean: list[str] = []
+                seen: set[str] = set()
+                for s in raw_sugg:
+                    s = str(s).strip().strip(".,!?\"'")
+                    # short answer words only; drop placeholders like "[Name]"
+                    if not s or len(s.split()) > 3 or "[" in s or "]" in s:
+                        continue
+                    k = s.lower()
+                    if k in seen:
+                        continue
+                    seen.add(k)
+                    clean.append(s)
+                    if len(clean) >= 8:
+                        break
+                if q:
+                    return q, clean
+            except (json.JSONDecodeError, TypeError, ValueError):
+                pass
+        return LearningService._clean_question(raw), []
 
-        Graph-aware: the model sees a summary of what's already known + the gaps,
-        and is told to ask about what's missing. Degrades to a rotating fallback
-        question if the LLM is unavailable (offline-safe).
+    def interview_question(self, person_id: str, history: list[dict[str, str]]) -> dict[str, Any]:
+        """Return the next graph-aware interview question AND a few tailored answer
+        words specific to it (so the UI's "Next" suggestions fit the question).
+
+        The model sees a summary of what's known + the gaps and returns JSON
+        {question, suggestions}. Degrades to a rotating fallback question (and no
+        suggestions, so the UI falls back to its keyword categories) if the LLM is
+        unavailable or the reply doesn't parse.
         """
         summary = self._graph_summary(person_id)
         convo_lines = [
@@ -418,18 +454,23 @@ class LearningService:
             "What I already know about this person:\n"
             f"{summary}\n\n"
             + (f"Conversation so far:\n{convo}\n\n" if convo else "This is the very first question.\n\n")
-            + "Ask the single next question to learn something I don't already know "
-            "(prefer the gaps above). Build on what they just said. Reply with ONLY "
-            "the question."
+            + "Produce the single next question to learn something I don't already know "
+            "(prefer the gaps above; build on what they just said), AND a few words the "
+            "person could tap to answer it.\n"
+            "Respond with ONLY a JSON object of exactly this shape:\n"
+            '{"question": "<one warm question, 1-2 sentences>", '
+            '"suggestions": ["<6-8 SHORT answer options specific to THIS question — single '
+            "words or 1-2 word phrases the person might pick (names, places, terms of "
+            'endearment, activities, times); concrete, not full sentences>"]}'
         )
         try:
             raw = self.llm.generate(user, system=_ASSISTANT_SYSTEM)
         except Exception:
             raw = ""
-        q = self._clean_question(raw)
-        if q:
-            return q
-        return self._FALLBACK_QUESTIONS[len(history or []) % len(self._FALLBACK_QUESTIONS)]
+        q, suggestions = self._parse_interview(raw)
+        if not q:
+            q = self._FALLBACK_QUESTIONS[len(history or []) % len(self._FALLBACK_QUESTIONS)]
+        return {"question": q, "suggestions": suggestions}
 
     # --- phrase mining (corpus helper) -------------------------------------
 
