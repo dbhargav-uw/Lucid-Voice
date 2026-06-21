@@ -13,16 +13,30 @@ const NAV_ITEMS = [
 function TopBar() {
   return (
     <header className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-ink-line bg-ink px-4 py-2.5 sm:px-6">
-      {/* Wordmark. */}
-      <div className="flex items-center gap-2">
-        <span
+      {/* Wordmark — the voice-orb mark + "Lucid" (Geist) · "Voice" (Newsreader
+          serif, the human-utterance type), matching assets/logo-lockup.svg. */}
+      <div className="flex items-center gap-2" aria-label="Lucid Voice">
+        <svg
           aria-hidden
-          className="text-[1.35rem] font-bold leading-none text-voice sm:text-[1.5rem]"
+          viewBox="0 0 100 100"
+          className="h-7 w-7 shrink-0 sm:h-8 sm:w-8"
         >
-          ◐
-        </span>
-        <span className="whitespace-nowrap font-ui text-[1.35rem] font-bold leading-none tracking-[-0.02em] text-text sm:text-[1.5rem]">
-          Lucid Voice
+          <circle cx="50" cy="50" r="46" fill="#E14826" />
+          <g fill="#FFFFFF">
+            <rect x="22" y="38" width="8" height="24" rx="4" />
+            <rect x="34" y="30" width="8" height="40" rx="4" />
+            <rect x="46" y="22" width="8" height="56" rx="4" />
+            <rect x="58" y="30" width="8" height="40" rx="4" />
+            <rect x="70" y="38" width="8" height="24" rx="4" />
+          </g>
+        </svg>
+        <span className="whitespace-nowrap leading-none tracking-[-0.02em]">
+          <span className="font-ui text-[1.35rem] font-bold text-text sm:text-[1.5rem]">
+            Lucid
+          </span>
+          <span className="ml-[0.18em] font-utter text-[1.35rem] font-medium text-voice sm:text-[1.5rem]">
+            Voice
+          </span>
         </span>
       </div>
 
